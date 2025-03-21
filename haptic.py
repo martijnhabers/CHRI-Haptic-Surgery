@@ -75,6 +75,12 @@ class PA:
         self.send_sock.sendto(send_data, ("localhost", 40002))  # send to IP address 192.168.0.3 and port 40001
 
 
+        self.object_dict = {
+            'skin': {'color': (186, 154, 127), 'rect': pygame.Rect(0, 100, 600, 50), 'force': 0},
+            'bone': {'color': (255, 5, 127), 'rect': pygame.Rect(0, 200, 600, 50), 'force': 0},
+            'heart': {'color': (255, 0, 0), 'rect': pygame.Rect(300, 350, 50, 50), 'force': 0},
+        }
+
         ##############################################
     
     def run(self):
@@ -162,7 +168,7 @@ class PA:
             pos_phys = g.inv_convert_pos(xh)
             pA0,pB0,pA,pB,pE = p.derive_device_pos(pos_phys) #derive the pantograph joint positions given some endpoint position
             pA0,pB0,pA,pB,xh = g.convert_pos(pA0,pB0,pA,pB,pE) #convert the physical positions to screen coordinates
-        g.render(pA0,pB0,pA,pB,xh,fe,xm)
+        g.render(pA0,pB0,pA,pB,xh,fe,xm, self.object_dict)
         
     def close(self):
         ##############################################

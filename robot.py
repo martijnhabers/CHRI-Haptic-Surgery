@@ -133,6 +133,11 @@ er = np.zeros(2) # Error
 Ks = np.diag([300,100]) # stiffness in the endpoint stiffness frame [N/m] 30
 Kd = 2*np.sqrt(Ks * m) # damping in the endpoint stiffness frame [N/ms-1]
 
+object_dict = {
+            'skin': {'color': (186, 154, 127), 'rect': pygame.Rect(0, 100, 600, 50), 'force': 0},
+            'bone': {'color': (255, 5, 127), 'rect': pygame.Rect(0, 200, 600, 50), 'force': 0},
+            'heart': {'color': (255, 0, 0), 'rect': pygame.Rect(300, 350, 50, 50), 'force': 0},
+        }
 
 theta = 0.0 # roation of the endpoint stiffness frame wrt the robot base frame [rad]
 stiffness_value_increment = 100 # for tele-impedance [N/m]
@@ -408,6 +413,10 @@ while run:
     '''*********** Student should fill in ***********'''
     # draw a wall
     pygame.draw.rect(window, (100, 100, 100), (wall_location_pygame[0, 0], wall_location_pygame[1, 0]-300, width_wall, height_wall))
+
+    for key in object_dict:
+        pygame.draw.rect(window, object_dict[key]['color'], object_dict[key]['rect'])
+        
     '''*********** Student should fill in ***********'''
     pygame.draw.circle(window, (0, 255, 0), (pm[0], pm[1]), 5) # draw reference position
     pygame.draw.lines(window, (0, 0, 255), False, [(window_scale*x0+xc,-window_scale*y0+yc), (window_scale*x1+xc,-window_scale*y1+yc), (window_scale*x2+xc,-window_scale*y2+yc)], 6) # draw links
