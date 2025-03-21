@@ -162,8 +162,8 @@ class Graphics:
         self.screenHaptics.fill(self.cWhite)  # erase the haptics surface
         # self.screenVR.fill(self.cLightblue) #erase the VR surface
         self.debug_text = ""
-
-    def render(self, pA0, pB0, pA, pB, pE, f, pM):
+    
+    def render(self,pA0,pB0,pA,pB,pE,f,pM, object_dict):
         ###################Render the Haptic Surface###################
         # set new position of items indicating the endpoint location
         self.haptic.center = pE  # the hhandle image and effort square will also use this position for drawing
@@ -193,7 +193,11 @@ class Graphics:
         # pygame.draw.line(self.screenHaptics, (0, 0, 0), (self.haptic.center),(self.haptic.center+2*k*(xm-xh)))
 
         ###################Render the VR surface###################
-        # pygame.draw.rect(self.screenVR, self.colorHaptic, self.haptic, border_radius=8)
+        if self.haptic_visible:
+            pygame.draw.rect(self.screenVR, self.colorHaptic, self.haptic, border_radius=8)
+
+        for key in object_dict:
+            pygame.draw.rect(self.screenVR, object_dict[key]['color'], object_dict[key]['rect'])
 
         if not self.device_connected:
             pygame.draw.lines(self.screenHaptics, (0, 0, 0), False, [self.effort_cursor.center, pM], 2)
