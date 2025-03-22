@@ -285,7 +285,7 @@ while run:
 
             '''*********** Student should fill in ***********'''
 
-    # Receive Force from UDP
+    # Receive Position from UDP
     recv_data, address = recv_sock.recvfrom(12)  # receive data with buffer size of 12 bytes
     position = struct.unpack("2f", recv_data)  # convert the received data from bytes to an array of 3 floats (assuming force in 3 axes)
     print("Received from address: ", address)
