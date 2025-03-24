@@ -27,7 +27,7 @@ FPS = int(1/dt) # refresh rate
 t = 0.0 # time
 
 pr = np.zeros(2) # reference endpoint position
-p = np.array([0.1,0.1]) # actual endpoint position
+p = np.array([500,500]) # actual endpoint position
 p_prev = np.zeros(2) # previous endpoint position
 dp = np.zeros(2) # actual endpoint velocity
 F = np.zeros(2) # endpoint force
@@ -47,6 +47,32 @@ object_dict = {
             'bone': {'color': (255, 5, 127), 'rect': pygame.Rect(0, 200, 600, 50), 'force': 0},
             'heart': {'color': (255, 0, 0), 'rect': pygame.Rect(300, 350, 50, 50), 'force': 0},
         }
+
+object_dict = {
+    'skin_0': {'color': (186, 154, 127), 'rect': pygame.Rect(0, 300, 600, 50), 'force': 0},
+    'skin_1': {'color': (186, 154, 127), 'rect': pygame.Rect(0, 350, 600, 50), 'force': 0},
+    'skin_2': {'color': (186, 154, 127), 'rect': pygame.Rect(0, 400, 600, 50), 'force': 0},
+    'skin_3': {'color': (186, 154, 127), 'rect': pygame.Rect(0, 450, 600, 50), 'force': 0},
+    'skin_4': {'color': (186, 154, 127), 'rect': pygame.Rect(0, 500, 600, 50), 'force': 0}
+}
+
+occupancy_grid = np.zeros((800, 600))
+for key in object_dict:
+    pg_rect = object_dict[key]['rect']
+    tl_x, tl_y = pg_rect.topleft
+    br_x, br_y = pg_rect.bottomright
+    occupancy_grid[tl_x:br_x, tl_y:br_y] = 1
+
+
+print(occupancy_grid)
+
+def in_collision_with_grid(pr):
+    if not (occupancy_grid[pr[0], pr[1]] or occupancy_grid[pr[0] + EE_width, pr[1]] or occupancy_grid[pr[0], pr[1] + EE_height] or occupancy_grid[pr[0] + EE_width, pr[1] + EE_height]):
+        return False
+    else:
+        return True
+
+
 def pygame_controls():
     for event in pygame.event.get(): # interrupt function
         if event.type == pygame.QUIT: # force quit with closing the window
@@ -114,11 +140,34 @@ while run:
     # Receive Position from UDP
     recv_data, address = recv_sock.recvfrom(12)  # receive data with buffer size of 12 bytes
     position = struct.unpack("2f", recv_data)  # convert the received data from bytes to an array of 3 floats (assuming force in 3 axes
-    p = np.asarray(position)
 
+    # Set position if no collision
+    prev_p = p
+    pr = np.asarray(position)
     # Transform coordinates
-    p[0] *= 800/600
-    p[1] *= 600/400
+    pr[0] *= 800/600
+    pr[1] *= 600/400
+    pr = np.int32(pr)
+
+    if not in_collision_with_grid(pr):
+        p = pr
+        pass
+    else:
+        err = pr - p
+        p_pot = p + np.int32(err/10)
+        p_pot_dx = np.array([p_pot[0], p[1]])
+        p_pot_dy = np.array([p[0], p_pot[1]])
+        print(p_pot_dx)
+        if not in_collision_with_grid(p_pot):
+            p = p_pot
+        elif not in_collision_with_grid(p_pot_dx):
+            p = p_pot_dx
+        elif not in_collision_with_grid(p_pot_dy):
+            p = p_pot_dy
+        else:
+            p = prev_p
+
+
     # if position.ndim == 1:
     #     position = np.expand_dims(position, axis=1)
     # position = np.vstack((position, np.ones((1, position.shape[1]))))
