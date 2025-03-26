@@ -163,7 +163,7 @@ class Graphics:
         # self.screenVR.fill(self.cLightblue) #erase the VR surface
         self.debug_text = ""
     
-    def render(self,pA0,pB0,pA,pB,pE,f,pM, object_dict):
+    def render(self,pA0,pB0,pA,pB,pE,f,pM):
         ###################Render the Haptic Surface###################
         # set new position of items indicating the endpoint location
         self.haptic.center = pE  # the hhandle image and effort square will also use this position for drawing
