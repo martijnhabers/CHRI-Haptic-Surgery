@@ -193,9 +193,6 @@ class Graphics:
         # pygame.draw.line(self.screenHaptics, (0, 0, 0), (self.haptic.center),(self.haptic.center+2*k*(xm-xh)))
 
         ###################Render the VR surface###################
-        for key in object_dict:
-            pygame.draw.rect(self.screenHaptics, object_dict[key]['color'], object_dict[key]['rect'])
-
         if not self.device_connected:
             pygame.draw.lines(self.screenHaptics, (0, 0, 0), False, [self.effort_cursor.center, pM], 2)
         ##Fuse it back together

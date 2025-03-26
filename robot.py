@@ -42,7 +42,7 @@ import math
 import matplotlib.pyplot as plt
 import pygame
 import socket, struct
-
+import random
 
 
 
@@ -117,6 +117,7 @@ FPS = int(1/dts) # refresh rate
 # initial conditions
 t = 0.0 # time
 pm = np.zeros(2) # mouse position
+prev_pm = np.zeros(2) # previous mouse position
 pr = np.zeros(2) # reference endpoint position
 p = np.array([0.1,0.1]) # actual endpoint position
 dp = np.zeros(2) # actual endpoint velocity
@@ -133,11 +134,50 @@ er = np.zeros(2) # Error
 Ks = np.diag([300,100]) # stiffness in the endpoint stiffness frame [N/m] 30
 Kd = 2*np.sqrt(Ks * m) # damping in the endpoint stiffness frame [N/ms-1]
 
+# Resolution in X
+x_steps = 25
+y_steps = 25
+
+window_width = 800
+window_height = 600
+
+offset = 0
 object_dict = {
-            'skin': {'color': (186, 154, 127), 'rect': pygame.Rect(0, 100, 600, 50), 'force': 0},
-            'bone': {'color': (255, 5, 127), 'rect': pygame.Rect(0, 200, 600, 50), 'force': 0},
-            'heart': {'color': (255, 0, 0), 'rect': pygame.Rect(300, 350, 50, 50), 'force': 0},
-        }
+    'air': {'color': (255, 255, 0), 'rect': pygame.Rect(0, 0+offset, window_width, 100), 'force': 0},
+    'skin1': {'color': (186, 154, 127), 'rect': pygame.Rect(0, 100+offset, window_width, 50), 'force': 0},
+    'skin2': {'color': (186, 154, 127), 'rect': pygame.Rect(0, 150+offset, 800, 50), 'force': 0},
+    'skin3': {'color': (186, 154, 127), 'rect': pygame.Rect(0, 200+offset, 800, 50), 'force': 0},
+    'bone': {'color': (240, 240, 240), 'rect': pygame.Rect(0, 250+offset, 800, 50), 'force': 0},
+    'tissue': {'color': (255, 182, 193), 'rect': pygame.Rect(0, 300+offset, 800, 50), 'force': 0},
+    'tumor': {'color': (255, 0, 255), 'rect': pygame.Rect(0, 350+offset, 800, 50), 'force': 0},
+    'heart': {'color': (255, 0, 0), 'rect': pygame.Rect(300, 300+offset, 68, 123), 'force': 0},
+}
+
+def generate_objects(object_dict, x_res, y_res):
+    dict = {}
+    for key in object_dict:
+        rect = object_dict[key]['rect']
+        color = object_dict[key]['color']
+        width = rect.width
+        height = rect.height
+        
+        offset_y = rect.y
+        offset_x = rect.x
+        for x in range(0, width, x_steps):
+            for y in range(0, height, y_steps):
+                rect = pygame.Rect(x + offset_x, y + offset_y, x_steps, y_steps)
+                random_color = tuple(random.randint(0, 255) for _ in range(3))
+                dict[key + str(x) + str(y)] = {'color': random_color, 'rect': rect, 'force': 0}
+    return dict
+
+color_dict = generate_objects(object_dict, x_steps, y_steps)
+
+# check if mouse is colliding with any object
+def check_collision(pm, dict):
+    for key in dict:
+        if dict[key]['rect'].collidepoint(pm):
+            return key
+    return None
 
 theta = 0.0 # roation of the endpoint stiffness frame wrt the robot base frame [rad]
 stiffness_value_increment = 100 # for tele-impedance [N/m]
@@ -145,12 +185,6 @@ stiffness_angle_increment = 10 # for tele-impedance [rad]
 
 # scaling
 window_scale = 800 # conversion from meters to pixles
-
-location_wall_robot = np.array([[0.1666, 0, 1]])
-width_wall = 300
-height_wall = 600
-
-force_perturbation = 1 #set to 1 to turn on and to 0 to turn off
 
 # Set up sockets
 send_sock = socket.socket(socket.AF_INET,socket.SOCK_DGRAM) # create a send socket
@@ -210,44 +244,19 @@ test = np.array([[5, 15, 1]]).T
 tf = transform_pygame_to_robot(test)
 
 
-
-def make_ellipse(ax0, ax1, s0, s1, center, color):
-    angles = np.linspace(0, 2*np.pi, 50)
-    points_circle = np.array([np.cos(angles)*0.02, np.sin(angles)*0.02, np.ones(50)])
-
-    T_ellipse = np.array([[ax0[0]*s0, ax1[0]*s1, center[0]],
-                  [ax0[1]*s0, -ax1[1]*s1, center[1]],
-                  [0, 0, 1]])
-
-    points_ellipse = np.matmul(T_ellipse, points_circle)
-
-    points_ellipse_pygame = (transform_robot_to_pygame(points_ellipse)).astype(dtype=int)
-    points_ellipse_pygame = points_ellipse_pygame.T[:, :2]
-
-    # print("points", points_ellipse_pygame)
-
-    pygame.draw.lines(window, color, True, points_ellipse_pygame, 2)
-
-def make_stiffness_ellipse(R, center, scale):
-    angles = np.linspace(0, 2 * np.pi, 50)
-    points_circle = np.array([np.cos(angles) * 0.02, np.sin(angles) * 0.02, np.ones(50)])
-
-    T_ellipse = np.array([[R[0,0] * scale, R[0,1] * scale, center[0]],
-                          [R[1,0] * scale, R[1,1] * scale, center[1]],
-                          [0, 0, 1]])
-
-    points_ellipse = np.matmul(T_ellipse, points_circle)
-    points_ellipse_pygame = (transform_robot_to_pygame(points_ellipse)).astype(dtype=int)
-    points_ellipse_pygame = points_ellipse_pygame.T[:, :2]
-
-    pygame.draw.lines(window, (200, 200, 50), True, points_ellipse_pygame, 2)
-
-
 # MAIN LOOP
 i = 0
 n = 0
 run = True
+use_color_map = True
 while run:
+    if t % 2.0 < 0.01:
+        use_color_map = not use_color_map
+        if use_color_map:
+            dict = color_dict
+        else:
+            dict = object_dict
+    
     for event in pygame.event.get(): # interrupt function
         if event.type == pygame.QUIT: # force quit with closing the window
             run = False
@@ -291,11 +300,23 @@ while run:
     print("Received from address: ", address)
     print("Received position: ", position)
     position = np.asarray(position)
+    # dummy position 
+    # position = np.array([300.0, 300.0])
     if position.ndim == 1:
         position = np.expand_dims(position, axis=1)
     position = np.vstack((position, np.ones((1, position.shape[1]))))
     pr = transform_haptic_to_robot(position)
 
+    colliding_key = check_collision(pm, color_dict)
+
+    if colliding_key:
+        color_dict[colliding_key]['color'] = (255, 0, 0)
+        p_col = prev_pm
+
+    else:
+        p_col = pm
+        prev_pm = pm
+    
 
     '''*********** Student should fill in ***********'''
     # main control code
@@ -306,7 +327,7 @@ while run:
     pm = np.vstack((pm, np.ones((1, pm.shape[1]))))
 
     # pr = transform_pygame_to_robot(pm)
-
+    pm = transform_robot_to_pygame(pr)
     pr = pr[:2,0].T
     pm = pm[:2,0].T
 
@@ -314,7 +335,6 @@ while run:
     print("Transformed to: ", pr)
     np.clip(pr, np.array([-0.2, -0.2]), np.array([0.2,0.2]))
     print("Transformed to: ", pr)
-    pm = pr
     print("----")
     print("p ", p)
     print("pr ", pr)
@@ -337,17 +357,11 @@ while run:
 
     F_spring = Ks_rot @ er
     F_damper = Kd_rot @ derr_dt
-    F_perturbation = np.array([0, 10*np.sin(t)])
     # F_perturbation = np.array([0,0]) #TODO:Remove
 
 
-
-
-
-
-
     # F = F_spring + F_damper
-    F = np.sum([F_spring, F_damper, F_perturbation], axis=0)
+    F = np.sum([F_spring, F_damper], axis=0)
 
     print(F_spring)
 
@@ -392,8 +406,6 @@ while run:
         p[0] = np.clip(p[0], -5, 0.1666)
     
     '''*********** Student should fill in ***********'''
-    # simulate a wall
-    wall_location_pygame = transform_robot_to_pygame(location_wall_robot.T).astype(dtype=int)
     '''*********** Student should fill in ***********'''
 
     # increase loop counter
@@ -411,14 +423,13 @@ while run:
     # real-time plotting
     window.fill((255,255,255)) # clear window
     '''*********** Student should fill in ***********'''
-    # draw a wall
-    pygame.draw.rect(window, (100, 100, 100), (wall_location_pygame[0, 0], wall_location_pygame[1, 0]-300, width_wall, height_wall))
 
-    for key in object_dict:
-        pygame.draw.rect(window, object_dict[key]['color'], object_dict[key]['rect'])
+    for key in dict:
+        pygame.draw.rect(window, dict[key]['color'], dict[key]['rect'])
         
     '''*********** Student should fill in ***********'''
     pygame.draw.circle(window, (0, 255, 0), (pm[0], pm[1]), 5) # draw reference position
+    pygame.draw.circle(window, (0, 0, 255), (p_col[0], p_col[1]), 5) # draw reference position
     pygame.draw.lines(window, (0, 0, 255), False, [(window_scale*x0+xc,-window_scale*y0+yc), (window_scale*x1+xc,-window_scale*y1+yc), (window_scale*x2+xc,-window_scale*y2+yc)], 6) # draw links
     pygame.draw.circle(window, (0, 0, 0), (window_scale*x0+xc,-window_scale*y0+yc), 9) # draw shoulder / base
     pygame.draw.circle(window, (0, 0, 0), (window_scale*x1+xc,-window_scale*y1+yc), 9) # draw elbow
@@ -433,7 +444,6 @@ while run:
     if pc.ndim == 1:
         pc = np.expand_dims(pc, axis=1)
     pc = np.vstack((pc, np.ones((1, pc.shape[1]))))
-    make_ellipse(ax0, ax1, s0, s1, pc[:2, 0], (255, 0, 0))
 
     # Make and plot an ellipse showing stiffness
     # s0 = R @ Ks @ np.array([0,1])
@@ -459,12 +469,11 @@ while run:
 
     # pygame.draw.line(window, (255,0,0), (300, 300), [400,400]*ax0_rot, 3)
 
-    make_stiffness_ellipse(Ks_rot, pc[:2, 0], 0.02)
 
     '''*********** Student should fill in ***********'''
 
     # print data
-    text = font.render("FPS = " + str( round( clock.get_fps() ) ) + "   K = " + str( [np.round(Ks[0,0],3),np.round(Ks[1,1],3)] ) + " N/m" + "   x = " + str( np.round(p,3) ) + " m" + "   x_r = " + str(np.round(pr,3) ) + " m" +"   F = " + str( np.round(F,3) ) + " N", True, (0, 0, 0), (255, 255, 255)) #Ks was k in original template
+    text = font.render("p_r: "+ str(pm) + "   FPS = " + str( round( clock.get_fps() ) ) + "   K = " + str( [np.round(Ks[0,0],3),np.round(Ks[1,1],3)] ) + " N/m" + "   x = " + str( np.round(p,3) ) + " m" + "   x_r = " + str(np.round(pr,3) ) + " m" +"   F = " + str( np.round(F,3) ) + " N", True, (0, 0, 0), (255, 255, 255)) #Ks was k in original template
     window.blit(text, textRect)
     
     pygame.display.flip() # update display
@@ -474,6 +483,7 @@ while run:
     # try to keep it real time with the desired step time
     clock.tick(FPS)
     
+
     if run == False:
         break
 
