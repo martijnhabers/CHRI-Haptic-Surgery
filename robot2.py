@@ -18,7 +18,7 @@ font = pygame.font.Font('freesansbold.ttf', 12) # printing text font and font si
 text = font.render('robot arm', True, (0, 0, 0), (255, 255, 255)) # printing text object
 textRect = text.get_rect()
 textRect.topleft = (10, 10) # printing text position with respect to the top-left corner of the window
-EE_width, EE_height = 2, 2
+EE_width, EE_height = 5, 5
 
 clock = pygame.time.Clock() # initialise clock
 FPS = int(1/dt) # refresh rate
@@ -29,6 +29,7 @@ t = 0.0 # time
 
 pr = np.zeros(2) # reference endpoint position
 p = np.array([500,500]) # actual endpoint position
+p_potential = None
 p_prev = np.zeros(2) # previous endpoint position
 dp = np.zeros(2) # actual endpoint velocity
 F = np.zeros(2) # endpoint force
@@ -40,24 +41,31 @@ orientation = 0  # Stiffness frame orientation
 er = np.zeros(2) # Error
 
 # IMPEDANCE CONTROLLER PARAMETERS
-Ks = np.diag([300,100]) # stiffness in the endpoint stiffness frame [N/m] 30
+Ks = np.diag([5000, 5000]) # stiffness in the endpoint stiffness frame [N/m] 30
 Kd = 2*np.sqrt(Ks * m) # damping in the endpoint stiffness frame [N/ms-1]
 
 window_width = 800
 window_height = 600
 
 offset = 200
+
 object_dict = {
-    'air': {'color': (255, 255, 0), 'rect': pygame.Rect(0, 0+offset, window_width, 100), 'force': 0},
-    'skin1': {'color': (186, 154, 127), 'rect': pygame.Rect(0, 100+offset, window_width, 50), 'force': 0},
-    'skin2': {'color': (186, 154, 127), 'rect': pygame.Rect(0, 150+offset, 800, 50), 'force': 0},
-    'skin3': {'color': (186, 154, 127), 'rect': pygame.Rect(0, 200+offset, 800, 50), 'force': 0},
-    'bone': {'color': (240, 240, 240), 'rect': pygame.Rect(0, 250+offset, 800, 50), 'force': 0},
-    'tissue': {'color': (255, 182, 193), 'rect': pygame.Rect(0, 300+offset, 800, 50), 'force': 0},
-    'tumor': {'color': (255, 0, 255), 'rect': pygame.Rect(0, 350+offset, 800, 50), 'force': 0},
-    'heart': {'color': (255, 0, 0), 'rect': pygame.Rect(300, 300+offset, 68, 123), 'force': 0},
+    # format: 'name': {'color': (R, G, B), 'rect': pygame.Rect(x_tl, y_tl, width, height), 'force': breaking force}
+    'heart': {'color': (255, 0, 0), 'rect': pygame.Rect(300, 300+offset, 75, 125), 'force': 25},
+    'heart2': {'color': (255, 0, 0), 'rect': pygame.Rect(450, 300+offset, 75, 125), 'force': 25},
+    'tumor': {'color': (255, 120, 255), 'rect': pygame.Rect(425, 350+offset, 50, 50), 'force': 5},
+
+
+    'skin': {'color': (186, 154, 127), 'rect': pygame.Rect(0, offset, window_width, 250), 'force': 150},
+    'bone': {'color': (240, 240, 240), 'rect': pygame.Rect(0, 250+offset, window_width, 50), 'force': 300},
+    'tissue': {'color': (255, 182, 193), 'rect': pygame.Rect(0, 300+offset, window_width, 50), 'force': 0},
+    'muscle': {'color': (96, 5, 33), 'rect': pygame.Rect(0, 350+offset, window_width, 50), 'force': 0},
 }
 
+# object dict one big square in the middle
+# object_dict = {
+#     'heart': {'color': (255, 0, 0), 'rect': pygame.Rect(300, 300, 100, 100), 'force': 500},
+# }
 # Resolution in X
 x_steps = 25
 y_steps = 25
@@ -66,9 +74,11 @@ y_steps = 25
 def generate_objects(object_dict, x_res, y_res):
     dict = {}
     i = 0
+    occupied_pixels = set()
     for key in object_dict:
         rect = object_dict[key]['rect']
         color = object_dict[key]['color']
+        force = object_dict[key]['force']
         width = rect.width
         height = rect.height
         
@@ -77,9 +87,12 @@ def generate_objects(object_dict, x_res, y_res):
         for x in range(0, width, x_res):
             for y in range(0, height, y_res):
                 rect = pygame.Rect(x + offset_x, y + offset_y, x_res, y_res)
-                random_color = tuple(random.randint(0, 255) for _ in range(3))
-                dict[str(int(i))] = {'color': color, 'rect': rect, 'force': 150}
-                i += 1
+                rect_pixels = {(rect.x + dx, rect.y + dy) for dx in range(rect.width) for dy in range(rect.height)}
+
+                if not rect_pixels & occupied_pixels:  # Check for overlap
+                    occupied_pixels.update(rect_pixels)
+                    dict[str(int(i))] = {'color': color, 'rect': rect, 'force': force}
+                    i += 1
     return dict
 
 split_object_dict = generate_objects(object_dict, x_steps, y_steps)
@@ -99,7 +112,7 @@ occupancy_grid = generate_occupancy_grid(split_object_dict)
 print(occupancy_grid)
 
 def in_collision_with_grid(pr):
-    if pr[0] < 0 or pr[0] > 800- EE_width or pr[1] < 0 or pr[1] > 600 - EE_height:
+    if pr[0] < 0 or pr[0] > 800 - EE_width - 1 or pr[1] < 0 or pr[1] > 600 - EE_height - 1:
         return False
     buffer = 0
     if not (occupancy_grid[pr[0], pr[1]] or occupancy_grid[pr[0] + EE_width - buffer, pr[1]] or occupancy_grid[pr[0], pr[1] + EE_height - buffer] or occupancy_grid[pr[0] + EE_width - buffer, pr[1] + EE_height - buffer]):
@@ -139,6 +152,10 @@ def pygame_controls():
             elif event.key == ord('s'):
                 orientation -= 10  # Decrease orientation
                 orientation = np.clip(orientation, -90, 90)
+            elif event.key == ord('q'):
+                # quit the program and send a message to the robot to stop
+                run = False
+
 
             Kd = 2 * np.sqrt(Ks * m)  # damping in the endpoint stiffness frame [N/m-1]
 
@@ -160,6 +177,12 @@ def render():
 
     pygame.draw.rect(window, (0, 0, 0), (p[0], p[1], EE_width, EE_height))
 
+    if p_potential is not None:
+        pygame.draw.rect(window, (0, 255, 0), (p_potential[0], p_potential[1], EE_width, EE_height))
+
+    # draw a small square at position "pr"
+    pygame.draw.rect(window, (0, 0, 255), (pr[0], pr[1], EE_width, EE_height))
+
     pygame.display.flip()
 
 def receive_udp():
@@ -167,6 +190,39 @@ def receive_udp():
 
 def send_udp():
     pass
+
+def bresenham_line(x0, y0, x1, y1):
+    """Bresenham's Line Algorithm to generate points on a line."""
+    points = []
+    dx = abs(x1 - x0)
+    dy = abs(y1 - y0)
+    sx = 1 if x0 < x1 else -1
+    sy = 1 if y0 < y1 else -1
+    err = dx - dy
+
+    while True:
+        points.append((x0, y0))
+        if x0 == x1 and y0 == y1:
+            break
+        e2 = err * 2
+        if e2 > -dy:
+            err -= dy
+            x0 += sx
+        if e2 < dx:
+            err += dx
+            y0 += sy
+
+    return points
+
+def has_line_of_sight(p, pr, occupancy_grid):
+    """Check if there is a line of sight between p and pr."""
+    line_points = bresenham_line(p[0], p[1], pr[0], pr[1])
+    for (x, y) in line_points:
+        if occupancy_grid[x, y] != 0:
+            return False
+    return True
+
+collision_counter = 0
 
 run = True
 while run:
@@ -185,33 +241,26 @@ while run:
     pr[1] *= 600/400
     pr = np.int32(pr)
 
-    F = (np.dot(Ks, (pr - p)) + np.dot(Kd, (np.zeros(2) - dp))) / 50
 
-    if not in_collision_with_grid(pr):
+    spring_force = - np.dot(Ks, (pr - p))
+    damping_force = - np.dot(Kd, (np.zeros(2) - dp))
+
+    # Scale because otherwise the force makes the robot unstable
+    F = (spring_force + damping_force) / 1000
+    F[0] = - F[0]
+
+    # boolean is first collision
+
+    if not in_collision_with_grid(pr) and has_line_of_sight(p, pr, occupancy_grid):
         #### IF NO COLLISION ####
         p = pr
     else:
         #### IF COLLISION ####
-        key_to_pop = str(int(occupancy_grid[pr[0], pr[1]]))
-        # check if key exists in split_object_dict
-        if key_to_pop in split_object_dict:
-            pg_rect = split_object_dict[key_to_pop]['rect']
-            breaking_force = split_object_dict[key_to_pop]['force']
-
-            print("Breaking force: ", breaking_force)
-            print("Force: ", np.linalg.norm(F))
-
-            # if np.linalg.norm(F) > breaking_force:
-            tl_x, tl_y = pg_rect.topleft
-            br_x, br_y = pg_rect.bottomright
-            occupancy_grid[tl_x:br_x, tl_y:br_y] = 0
-            split_object_dict.pop(key_to_pop)
-            
         err = pr - p
         p_pot = p + np.int32(err/10)
         p_pot_dx = np.array([p_pot[0], p[1]])
         p_pot_dy = np.array([p[0], p_pot[1]])
-        print(p_pot_dx)
+        # print(p_pot_dx)
         if not in_collision_with_grid(p_pot):
             p = p_pot
         elif not in_collision_with_grid(p_pot_dx):
@@ -220,6 +269,29 @@ while run:
             p = p_pot_dy
         else:
             p = prev_p
+
+        # normalized direction between pr and p
+        direction = err / np.linalg.norm(err)
+
+        # check with added buffer in direction of collision
+        p_potential = p + np.int32(EE_width*2*(direction / np.linalg.norm(direction)))
+
+        key_to_pop = str(int(occupancy_grid[p_potential[0], p_potential[1]]))
+        # check if key exists in split_object_dict
+        if key_to_pop in split_object_dict:
+            pg_rect = split_object_dict[key_to_pop]['rect']
+            breaking_force = split_object_dict[key_to_pop]['force']
+
+            print("Breaking force: ", breaking_force)
+            print("Force: ", round(np.linalg.norm(F)))
+
+            if np.linalg.norm(F) > breaking_force:
+                tl_x, tl_y = pg_rect.topleft
+                br_x, br_y = pg_rect.bottomright
+                occupancy_grid[tl_x:br_x, tl_y:br_y] = 0
+                split_object_dict.pop(key_to_pop)
+            
+
 
 
     # if position.ndim == 1:
