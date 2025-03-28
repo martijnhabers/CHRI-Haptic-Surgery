@@ -53,20 +53,20 @@ window_height = 600
 offset = 300
 object_dict = {
     # format: 'name': {'color': (R, G, B), 'rect': pygame.Rect(x_tl, y_tl, width, height), 'force': breaking force}
-    'heart': {'color': (255, 0, 0), 'rect': pygame.Rect(300, 300 + offset, 75, 125), 'force': 25},
-    'heart2': {'color': (255, 0, 0), 'rect': pygame.Rect(450, 300 + offset, 75, 125), 'force': 25},
-    'tumor': {'color': (255, 120, 255), 'rect': pygame.Rect(425, 350 + offset, 50, 50), 'force': 5},
-    'skin': {'color': (186, 154, 127), 'rect': pygame.Rect(0, offset, window_width, 250), 'force': 150},
-    'bone': {'color': (240, 240, 240), 'rect': pygame.Rect(0, 250 + offset, window_width, 50), 'force': 300},
+    'heart': {'color': (255, 0, 0), 'rect': pygame.Rect(300, 300 + offset, 75, 125), 'force': 25*100},
+    'heart2': {'color': (255, 0, 0), 'rect': pygame.Rect(450, 300 + offset, 75, 125), 'force': 25*100},
+    'tumor': {'color': (255, 120, 255), 'rect': pygame.Rect(425, 350 + offset, 50, 50), 'force': 5*100},
+    'skin': {'color': (186, 154, 127), 'rect': pygame.Rect(0, offset, window_width, 250), 'force': 150*100},
+    'bone': {'color': (240, 240, 240), 'rect': pygame.Rect(0, 250 + offset, window_width, 50), 'force': 300*100},
     'tissue': {'color': (255, 182, 193), 'rect': pygame.Rect(0, 300 + offset, window_width, 50), 'force': 0},
     'muscle': {'color': (96, 5, 33), 'rect': pygame.Rect(0, 350 + offset, window_width, 50), 'force': 0},
 }
 
 materials = {
-    "heart" : {"color": (255, 0, 0), "force": 25*5},
-    "tumor" : {"color": (255, 120, 255), "force": 5*5},
-    "skin" : {"color": (186, 154, 127), "force": 150*5},
-    "bone" : {"color": (240, 240, 240), "force": 400*5},
+    "heart" : {"color": (255, 0, 0), "force": 25*50},
+    "tumor" : {"color": (255, 120, 255), "force": 5*50},
+    "skin" : {"color": (186, 154, 127), "force": 150*50},
+    "bone" : {"color": (240, 240, 240), "force": 400*50},
     # "tissue" : {"color": (255, 182, 193), "force": 0},
     # "muscle" : {"color": (96, 5, 33), "force": 0},
     # "lung" : {"color": (255, 255, 0), "force": 0},
@@ -204,7 +204,7 @@ def render():
 
     pygame.display.flip()
 
-def should_pop(idd):
+def should_pop(idd, direction):
     key_to_pop = str(int(idd))
     # check if key exists in split_object_dict
     if key_to_pop in split_object_dict:
@@ -213,12 +213,19 @@ def should_pop(idd):
 
         print("Breaking force: ", breaking_force)
         print("Force: ", np.linalg.norm(F))
-
-        if np.linalg.norm(F) > breaking_force:
+        Fx, Fy = F
+        if abs(Fx) > breaking_force and direction in ["mid-left", "mid-right"]:
             tl_x, tl_y = pg_rect.topleft
             br_x, br_y = pg_rect.bottomright
             occupancy_grid[tl_x:br_x, tl_y:br_y] = 0
             split_object_dict.pop(key_to_pop)
+
+        if abs(Fy) > breaking_force and direction in ["mid-top", "mid-bottom"]:
+            tl_x, tl_y = pg_rect.topleft
+            br_x, br_y = pg_rect.bottomright
+            occupancy_grid[tl_x:br_x, tl_y:br_y] = 0
+            split_object_dict.pop(key_to_pop)
+
     else:
         print(f"Key {key_to_pop} not found in split_object_dict.")
 
@@ -295,28 +302,28 @@ while run:
             p[0] = np.clip(p[0], br_x, window_width)
             dp[0] = 0
             print("clipping left", x)
-            should_pop(idd)
+            should_pop(idd, "mid-left")
             processed_ids.add(str(int(idd)))
 
         elif direction in ["mid-right"]: #, "top-right", "bottom-right"
             p[0] = np.clip(p[0], 0, tl_x-EE_width)
             dp[0] = 0
             print("clipping right", x)
-            should_pop(idd)
+            should_pop(idd, "mid-right")
             processed_ids.add(str(int(idd)))
 
         if direction in ["mid-top"]: #, "top-left", "top-right"
             p[1] = np.clip(p[1], br_y, window_height)
             dp[1] = 0
             print("clipping top", y)
-            should_pop(idd)
+            should_pop(idd, "mid-top")
             processed_ids.add(str(int(idd)))
 
         elif direction in ["mid-bottom"]: #, "bottom-left", "bottom-right"
             p[1] = np.clip(p[1], 0, tl_y-EE_height)
             dp[1] = 0
             print("clipping bot", y)
-            should_pop(idd)
+            should_pop(idd, "mid-bottom")
             processed_ids.add(str(int(idd)))
         
 
