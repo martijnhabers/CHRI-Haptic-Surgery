@@ -18,7 +18,7 @@ font = pygame.font.Font('freesansbold.ttf', 12) # printing text font and font si
 text = font.render('robot arm', True, (0, 0, 0), (255, 255, 255)) # printing text object
 textRect = text.get_rect()
 textRect.topleft = (10, 10) # printing text position with respect to the top-left corner of the window
-EE_width, EE_height = 2, 2
+EE_width, EE_height = 25, 25
 
 clock = pygame.time.Clock() # initialise clock
 FPS = int(1/dt) # refresh rate
@@ -28,7 +28,7 @@ FPS = int(1/dt) # refresh rate
 t = 0.0 # time
 
 pr = np.zeros(2) # reference endpoint position
-p = np.array([500,500]) # actual endpoint position
+p = np.array([50,50]) # actual endpoint position
 p_prev = np.zeros(2) # previous endpoint position
 dp = np.zeros(2) # actual endpoint velocity
 F = np.zeros(2) # endpoint force
@@ -40,8 +40,8 @@ orientation = 0  # Stiffness frame orientation
 er = np.zeros(2) # Error
 
 # IMPEDANCE CONTROLLER PARAMETERS
-Ks = np.diag([1,1]) # stiffness in the endpoint stiffness frame [N/m] 30
-Kd = 2*np.sqrt(Ks * m) # damping in the endpoint stiffness frame [N/ms-1]
+Ks = np.diag([10,10]) # stiffness in the endpoint stiffness frame [N/m] 30
+Kd = 2*np.sqrt(Ks * m)/100 # damping in the endpoint stiffness frame [N/ms-1]
 
 # Kd = np.diag([0.005,0.005])
 
@@ -104,10 +104,39 @@ def in_collision_with_grid(pr):
     if pr[0] < 0 or pr[0] > 800- EE_width or pr[1] < 0 or pr[1] > 600 - EE_height:
         return False
     buffer = 0
-    if not (occupancy_grid[pr[0], pr[1]] or occupancy_grid[pr[0] + EE_width - buffer, pr[1]] or occupancy_grid[pr[0], pr[1] + EE_height - buffer] or occupancy_grid[pr[0] + EE_width - buffer, pr[1] + EE_height - buffer]):
+    # Check if there is a collision from the top
+
+
+    if not (occupancy_grid[pr[0], pr[1]] or occupancy_grid[pr[0] + EE_width, pr[1]] or occupancy_grid[pr[0], pr[1] + EE_height] or occupancy_grid[pr[0] + EE_width, pr[1] + EE_height]):
         return False
     else:
         return True
+
+
+#TODO: new possible approach: once a block collides with an object, keep it "on rails", allowing it to move only in certain ways along the edges of the object/objecs
+def check_collision(p, occupancy_grid=None):
+    # Check if any of the 96 edge points collide with occupied cells
+    collisions = []
+    for i in range(EE_width - 2):  # points along the top and bottom edges
+        if (occupancy_grid[p[0] + i + 1, p[1]]):    # Bottom edge
+            collisions.append("bottom")
+        if(occupancy_grid[p[0] + i + 1, p[1] + EE_height]):  # Top edge
+            collisions.append("top")
+
+    for i in range(EE_height - 2):  # points along the left and right edges
+        if (occupancy_grid[p[0], p[1] + i + 1]):    # Left edge
+            collisions.append("left")
+        if (occupancy_grid[p[0] + EE_width, p[1] + i + 1]):  # Right edge
+            collisions.append("right")
+
+    # Check the four corners # TODO: add separate collision check things
+    # if (occupancy_grid[p[0], p[1]] or
+    #         occupancy_grid[p[0] + EE_width, p[1]] or
+    #         occupancy_grid[p[0], p[1] + EE_height] or
+    #         occupancy_grid[p[0] + EE_width, p[1] + EE_height]):
+    #     return True
+
+    return collisions  # No collision detected
 
 
 def pygame_controls():
@@ -161,6 +190,7 @@ def render():
         pygame.draw.rect(window, split_object_dict[key]['color'], split_object_dict[key]['rect'])
 
     pygame.draw.rect(window, (0, 0, 0), (p[0], p[1], EE_width, EE_height))
+    pygame.draw.rect(window, (255, 0, 0), (pr[0], pr[1], int(EE_width/2), int(EE_height/2)))
 
     pygame.display.flip()
 
@@ -201,6 +231,14 @@ while run:
     print("F_damper: ", F_damper)
     F = - F
 
+    # integration
+    ddp = F / m
+    print(ddp)
+    dp += ddp * dt
+    print(dp)
+    p += dp * dt
+    t += dt
+
     if not in_collision_with_grid(pr):
         #### IF NO COLLISION ####
         p = pr
@@ -222,10 +260,9 @@ while run:
                 split_object_dict.pop(key_to_pop)
             
         err = pr - p
-        p_pot = p + np.int32(err/10)
+        p_pot = np.int32(p + np.int32(err/10))
         p_pot_dx = np.array([p_pot[0], p[1]])
         p_pot_dy = np.array([p[0], p_pot[1]])
-        print(p_pot_dx)
         if not in_collision_with_grid(p_pot):
             p = p_pot
         elif not in_collision_with_grid(p_pot_dx):
