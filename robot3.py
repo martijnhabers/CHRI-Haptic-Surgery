@@ -50,40 +50,75 @@ Kd = 2*np.sqrt(Ks * m)*10# damping in the endpoint stiffness frame [N/ms-1]
 window_width = 800
 window_height = 600
 
-offset = 200
+offset = 300
 object_dict = {
-    'air': {'color': (255, 255, 0), 'rect': pygame.Rect(0, 0+offset, window_width/2, 100), 'force': 0},
-    'skin1': {'color': (186, 154, 127), 'rect': pygame.Rect(0, 100+offset, window_width/2, 50), 'force': 0},
-    'skin2': {'color': (186, 154, 127), 'rect': pygame.Rect(0, 150+offset, 800/2, 50), 'force': 0},
-    'skin3': {'color': (186, 154, 127), 'rect': pygame.Rect(0, 200+offset, 800, 50), 'force': 0},
-    'bone': {'color': (240, 240, 240), 'rect': pygame.Rect(0, 250+offset, 800, 50), 'force': 0},
-    'tissue': {'color': (255, 182, 193), 'rect': pygame.Rect(0, 300+offset, 800, 50), 'force': 0},
-    'tumor': {'color': (255, 0, 255), 'rect': pygame.Rect(0, 350+offset, 800, 50), 'force': 0},
-    'heart': {'color': (255, 0, 0), 'rect': pygame.Rect(300, 300+offset, 68, 123), 'force': 0},
+    # format: 'name': {'color': (R, G, B), 'rect': pygame.Rect(x_tl, y_tl, width, height), 'force': breaking force}
+    'heart': {'color': (255, 0, 0), 'rect': pygame.Rect(300, 300 + offset, 75, 125), 'force': 25},
+    'heart2': {'color': (255, 0, 0), 'rect': pygame.Rect(450, 300 + offset, 75, 125), 'force': 25},
+    'tumor': {'color': (255, 120, 255), 'rect': pygame.Rect(425, 350 + offset, 50, 50), 'force': 5},
+    'skin': {'color': (186, 154, 127), 'rect': pygame.Rect(0, offset, window_width, 250), 'force': 150},
+    'bone': {'color': (240, 240, 240), 'rect': pygame.Rect(0, 250 + offset, window_width, 50), 'force': 300},
+    'tissue': {'color': (255, 182, 193), 'rect': pygame.Rect(0, 300 + offset, window_width, 50), 'force': 0},
+    'muscle': {'color': (96, 5, 33), 'rect': pygame.Rect(0, 350 + offset, window_width, 50), 'force': 0},
 }
+
+materials = {
+    "heart" : {"color": (255, 0, 0), "force": 25*5},
+    "tumor" : {"color": (255, 120, 255), "force": 5*5},
+    "skin" : {"color": (186, 154, 127), "force": 150*5},
+    "bone" : {"color": (240, 240, 240), "force": 400*5},
+    # "tissue" : {"color": (255, 182, 193), "force": 0},
+    # "muscle" : {"color": (96, 5, 33), "force": 0},
+    # "lung" : {"color": (255, 255, 0), "force": 0},
+    # "fat" : {"color": (255, 140, 0), "force": 0},
+    # "nerve" : {"color": (0, 255, 0), "force": 0},
+}
+
+def generate_random_object_configurations(num_layers, materials=materials):
+    object_dict = {}
+    y_height = 0
+    material_keys = list(materials.keys())  # Get the keys of the materials dictionary
+    for i in range(num_layers):
+        layer_name = f'layer_{i}'
+        selected_material = random.choice(material_keys)  # Randomly select a material
+        material = materials[selected_material]  # Get the material properties
+        color = material["color"]
+        force = material["force"]
+        height = random.randrange(50, 150, 25)  # Random height for the layer
+        rect = pygame.Rect(0, y_height, window_width, height)
+        y_height += height
+        object_dict[layer_name] = {'color': color, 'rect': rect, 'force': force}
+    return object_dict
 
 # Resolution in X
 x_steps = 25
 y_steps = 25
 
+# Generate random object configurations, for training
+object_dict = generate_random_object_configurations(8)
 
 def generate_objects(object_dict, x_res, y_res):
     dict = {}
     i = 0
+    occupied_pixels = set()
     for key in object_dict:
         rect = object_dict[key]['rect']
         color = object_dict[key]['color']
+        force = object_dict[key]['force']
         width = rect.width
         height = rect.height
-        
+
         offset_y = rect.y
         offset_x = rect.x
         for x in range(0, width, x_res):
             for y in range(0, height, y_res):
                 rect = pygame.Rect(x + offset_x, y + offset_y, x_res, y_res)
-                random_color = tuple(random.randint(0, 255) for _ in range(3))
-                dict[str(int(i))] = {'color': color, 'rect': rect, 'force': 5000}
-                i += 1
+                rect_pixels = {(rect.x + dx, rect.y + dy) for dx in range(rect.width) for dy in range(rect.height)}
+
+                if not rect_pixels & occupied_pixels:  # Check for overlap
+                    occupied_pixels.update(rect_pixels)
+                    dict[str(int(i))] = {'color': color, 'rect': rect, 'force': force}
+                    i += 1
     return dict
 
 split_object_dict = generate_objects(object_dict, x_steps, y_steps)
@@ -99,41 +134,11 @@ def generate_occupancy_grid(split_object_dict):
 
 occupancy_grid = generate_occupancy_grid(split_object_dict)
 
-
-print(occupancy_grid)
-
-def in_collision_with_grid(pr):
-    if pr[0] < 0 or pr[0] > 800- EE_width or pr[1] < 0 or pr[1] > 600 - EE_height:
-        return False
-    buffer = 0
-    # Check if there is a collision from the top
-
-
-    if not (occupancy_grid[pr[0], pr[1]] or occupancy_grid[pr[0] + EE_width, pr[1]] or occupancy_grid[pr[0], pr[1] + EE_height] or occupancy_grid[pr[0] + EE_width, pr[1] + EE_height]):
-        return False
-    else:
-        return True
-
-
-#TODO: new possible approach: once a block collides with an object, keep it "on rails", allowing it to move only in certain ways along the edges of the object/objecs
-
-
 def check_collision(p, occupancy_grid, buffer=0):
     p = np.int32(p)
     collisions = {}
 
     # Define the 8 critical points with buffer applied
-    critical_points = {
-        "bottom-left": (p[0] - buffer, p[1] - buffer),
-        "bottom-right": (p[0] + EE_width + buffer, p[1] - buffer),
-        "top-left": (p[0] - buffer, p[1] + EE_height + buffer),
-        "top-right": (p[0] + EE_width + buffer, p[1] + EE_height + buffer),
-        "mid-bottom": (p[0] + EE_width // 2, p[1] - buffer),
-        "mid-top": (p[0] + EE_width // 2, p[1] + EE_height + buffer),
-        "mid-left": (p[0] - buffer, p[1] + EE_height // 2),
-        "mid-right": (p[0] + EE_width + buffer, p[1] + EE_height // 2),
-    }
-
     critical_points = {
         "top-left": (p[0] - buffer, p[1] - buffer),
         "top-right": (p[0] + EE_width + buffer, p[1] - buffer),
@@ -147,11 +152,11 @@ def check_collision(p, occupancy_grid, buffer=0):
 
     # Check for collisions and store them in a dictionary
     for alias, (x, y) in critical_points.items():
-        if occupancy_grid[x, y]:  # If occupied
-            collisions[alias] = (x, y, occupancy_grid[x, y])
+        collision_id = occupancy_grid[x, y]
+        if collision_id:  # If occupied
+            collisions[alias] = (x, y, int(collision_id))
 
     return collisions  # Dictionary of alias -> coordinate
-
 
 
 def pygame_controls():
@@ -188,16 +193,6 @@ def pygame_controls():
 
             Kd = 2 * np.sqrt(Ks * m)  # damping in the endpoint stiffness frame [N/m-1]
 
-# Set up sockets
-send_sock = socket.socket(socket.AF_INET,socket.SOCK_DGRAM) # create a send socket
-recv_sock = socket.socket(socket.AF_INET,socket.SOCK_DGRAM) # create a receive socket
-recv_sock.bind(("localhost", 40002)) # bind the socket to port 40002
-
-# Send dummy data
-force = np.array([0.0, 0.0])
-send_data = bytearray(struct.pack("=%sf" % force.size, *force))  # convert array of 3 floats to bytes
-send_sock.sendto(send_data, ("localhost", 40001))  # send to IP address 192.168.0.3 and port 40001
-
 def render():
     window.fill((255, 255, 255))  # clear window
 
@@ -224,28 +219,39 @@ def should_pop(idd):
             br_x, br_y = pg_rect.bottomright
             occupancy_grid[tl_x:br_x, tl_y:br_y] = 0
             split_object_dict.pop(key_to_pop)
-def receive_udp():
-    pass
+    else:
+        print(f"Key {key_to_pop} not found in split_object_dict.")
 
-def send_udp():
-    pass
+# Set up sockets
+send_sock = socket.socket(socket.AF_INET,socket.SOCK_DGRAM) # create a send socket
+recv_sock = socket.socket(socket.AF_INET,socket.SOCK_DGRAM) # create a receive socket
+recv_sock.bind(("localhost", 40002)) # bind the socket to port 40002
+
+# Send dummy data
+force = F
+send_data = bytearray(struct.pack("=%sf" % force.size, *force))  # convert array of 3 floats to bytes
+send_sock.sendto(send_data, ("localhost", 40001))  # send to IP address 192.168.0.3 and port 40001
+
+def receive_udp():
+    recv_data, address = recv_sock.recvfrom(12)  # receive data with buffer size of 12 bytes
+    position = struct.unpack("2f", recv_data)  # convert the received data from bytes to an array of 3 floats (assuming force in 3 axes
+    return position
+
+def send_udp(force):
+    # Send Force over UDP
+    force = np.array(F)
+    send_data = bytearray(struct.pack("=%sf" % force.size, *force))  # convert array of 3 floats to bytes
+    send_sock.sendto(send_data, ("localhost", 40001))  # send to IP address 192.168.0.3 and port 40001
 
 run = True
 while run:
     pygame_controls()
-
-
-    # Receive Reference Position from UDP
-    recv_data, address = recv_sock.recvfrom(12)  # receive data with buffer size of 12 bytes
-    position = struct.unpack("2f", recv_data)  # convert the received data from bytes to an array of 3 floats (assuming force in 3 axes
-
-    # Set position if no collision
-
+    position = receive_udp()  # Receive position from UDP
     pr = np.asarray(position)
+
     # Transform coordinates
     pr[0] *= 800/600
     pr[1] *= 600/400
-
 
     er_prev = er
     er = np.subtract(pr, p)  # Error
@@ -277,44 +283,44 @@ while run:
 
     collisions = check_collision(p, occupancy_grid, buffer=1)
 
-
+    processed_ids = set()
     for direction, (x, y, idd) in collisions.items():
+        if str(int(idd)) in processed_ids:
+            continue
+
         pg_rect = split_object_dict[str(int(idd))]['rect']
         tl_x, tl_y = pg_rect.topleft
         br_x, br_y = pg_rect.bottomright
         if direction in ["mid-left"]: #, "top-left", "bottom-left"
             p[0] = np.clip(p[0], br_x, window_width)
             dp[0] = 0
+            print("clipping left", x)
             should_pop(idd)
+            processed_ids.add(str(int(idd)))
 
         elif direction in ["mid-right"]: #, "top-right", "bottom-right"
             p[0] = np.clip(p[0], 0, tl_x-EE_width)
             dp[0] = 0
+            print("clipping right", x)
             should_pop(idd)
-            # print("clipping right", x)
+            processed_ids.add(str(int(idd)))
+
         if direction in ["mid-top"]: #, "top-left", "top-right"
             p[1] = np.clip(p[1], br_y, window_height)
             dp[1] = 0
+            print("clipping top", y)
             should_pop(idd)
-            # print("clipping top", y)
+            processed_ids.add(str(int(idd)))
+
         elif direction in ["mid-bottom"]: #, "bottom-left", "bottom-right"
             p[1] = np.clip(p[1], 0, tl_y-EE_height)
             dp[1] = 0
+            print("clipping bot", y)
             should_pop(idd)
-            # print("clipping bot", y)
+            processed_ids.add(str(int(idd)))
+        
 
-
-    # if position.ndim == 1:
-    #     position = np.expand_dims(position, axis=1)
-    # position = np.vstack((position, np.ones((1, position.shape[1]))))
-
-    # Send Force over UDP
-    force = np.array(F)
-    send_data = bytearray(struct.pack("=%sf" % force.size, *force))  # convert array of 3 floats to bytes
-    send_sock.sendto(send_data, ("localhost", 40001))  # send to IP address 192.168.0.3 and port 40001
-
-
-
+    send_udp(F)
     render()
 
     if run == False:
