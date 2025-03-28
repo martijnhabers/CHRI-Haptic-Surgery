@@ -42,7 +42,8 @@ orientation = 0  # Stiffness frame orientation
 er = np.zeros(2) # Error
 
 # IMPEDANCE CONTROLLER PARAMETERS
-Ks = np.diag([1000.0,1000.0])*20 # stiffness in the endpoint stiffness frame [N/m] 30
+Ks_initial = np.diag([1000.0,1000.0])*10
+Ks = Ks_initial.copy() # stiffness in the endpoint stiffness frame [N/m] 30
 Kd = 2*np.sqrt(Ks * m)*10# damping in the endpoint stiffness frame [N/ms-1]
 
 # Kd = np.diag([0.005,0.005])
@@ -51,6 +52,7 @@ window_width = 800
 window_height = 600
 
 offset = 300
+#TODO: add stiffnesses if you use the original object_dict
 object_dict = {
     # format: 'name': {'color': (R, G, B), 'rect': pygame.Rect(x_tl, y_tl, width, height), 'force': breaking force}
     'heart': {'color': (255, 0, 0), 'rect': pygame.Rect(300, 300 + offset, 75, 125), 'force': 25*100},
@@ -63,10 +65,10 @@ object_dict = {
 }
 
 materials = {
-    "heart" : {"color": (255, 0, 0), "force": 25*50},
-    "tumor" : {"color": (255, 120, 255), "force": 5*50},
-    "skin" : {"color": (186, 154, 127), "force": 150*50},
-    "bone" : {"color": (240, 240, 240), "force": 400*50},
+    "heart" : {"color": (255, 0, 0), "force": 25*50, "stiffness": 3000},
+    "tumor" : {"color": (255, 120, 255), "force": 50*50, "stiffness": 6000},
+    "skin" : {"color": (186, 154, 127), "force": 150*50, "stiffness": 4500},
+    "bone" : {"color": (240, 240, 240), "force": 400*50, "stiffness": 15000},
     # "tissue" : {"color": (255, 182, 193), "force": 0},
     # "muscle" : {"color": (96, 5, 33), "force": 0},
     # "lung" : {"color": (255, 255, 0), "force": 0},
@@ -84,10 +86,11 @@ def generate_random_object_configurations(num_layers, materials=materials):
         material = materials[selected_material]  # Get the material properties
         color = material["color"]
         force = material["force"]
+        stiffness = material["stiffness"]
         height = random.randrange(50, 150, 25)  # Random height for the layer
         rect = pygame.Rect(0, y_height, window_width, height)
         y_height += height
-        object_dict[layer_name] = {'color': color, 'rect': rect, 'force': force}
+        object_dict[layer_name] = {'color': color, 'rect': rect, 'force': force, 'stiffness': stiffness}
     return object_dict
 
 # Resolution in X
@@ -105,6 +108,7 @@ def generate_objects(object_dict, x_res, y_res):
         rect = object_dict[key]['rect']
         color = object_dict[key]['color']
         force = object_dict[key]['force']
+        stiffness = object_dict[key]['stiffness']
         width = rect.width
         height = rect.height
 
@@ -117,7 +121,7 @@ def generate_objects(object_dict, x_res, y_res):
 
                 if not rect_pixels & occupied_pixels:  # Check for overlap
                     occupied_pixels.update(rect_pixels)
-                    dict[str(int(i))] = {'color': color, 'rect': rect, 'force': force}
+                    dict[str(int(i))] = {'color': color, 'rect': rect, 'force': force, 'stiffness': stiffness}
                     i += 1
     return dict
 
@@ -229,6 +233,12 @@ def should_pop(idd, direction):
     else:
         print(f"Key {key_to_pop} not found in split_object_dict.")
 
+def adjust_stifness(object_dict, idd):
+    global Ks
+    material_stifness = object_dict[str(int(idd))]['stiffness']
+    Ks = np.diag([material_stifness, material_stifness])
+
+
 # Set up sockets
 send_sock = socket.socket(socket.AF_INET,socket.SOCK_DGRAM) # create a send socket
 recv_sock = socket.socket(socket.AF_INET,socket.SOCK_DGRAM) # create a receive socket
@@ -289,6 +299,8 @@ while run:
 
 
     collisions = check_collision(p, occupancy_grid, buffer=1)
+    if len(collisions) == 0:
+        Ks = Ks_initial.copy()
 
     processed_ids = set()
     for direction, (x, y, idd) in collisions.items():
@@ -298,10 +310,11 @@ while run:
         pg_rect = split_object_dict[str(int(idd))]['rect']
         tl_x, tl_y = pg_rect.topleft
         br_x, br_y = pg_rect.bottomright
-        if direction in ["mid-left"]: #, "top-left", "bottom-left"
+        if direction in ["mid-left"]: #,"top-left", "bottom-left"
             p[0] = np.clip(p[0], br_x, window_width)
             dp[0] = 0
             print("clipping left", x)
+            adjust_stifness(split_object_dict, idd)
             should_pop(idd, "mid-left")
             processed_ids.add(str(int(idd)))
 
@@ -309,6 +322,7 @@ while run:
             p[0] = np.clip(p[0], 0, tl_x-EE_width)
             dp[0] = 0
             print("clipping right", x)
+            adjust_stifness(split_object_dict, idd)
             should_pop(idd, "mid-right")
             processed_ids.add(str(int(idd)))
 
@@ -316,6 +330,7 @@ while run:
             p[1] = np.clip(p[1], br_y, window_height)
             dp[1] = 0
             print("clipping top", y)
+            adjust_stifness(split_object_dict, idd)
             should_pop(idd, "mid-top")
             processed_ids.add(str(int(idd)))
 
@@ -323,6 +338,7 @@ while run:
             p[1] = np.clip(p[1], 0, tl_y-EE_height)
             dp[1] = 0
             print("clipping bot", y)
+            adjust_stifness(split_object_dict, idd)
             should_pop(idd, "mid-bottom")
             processed_ids.add(str(int(idd)))
         
