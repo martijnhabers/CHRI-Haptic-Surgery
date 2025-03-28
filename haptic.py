@@ -8,6 +8,7 @@ from matplotlib import pyplot as plt
 from Physics import Physics
 from Graphics import Graphics
 import socket, struct
+import os
 
 
 
@@ -140,9 +141,6 @@ class PA:
         # Send position data and receive Force data
         recv_data, address = self.recv_sock.recvfrom(12)  # receive data with buffer size of 12 bytes
         force = struct.unpack("2f", recv_data)  # convert the received data from bytes to an array of 3 floats (assuming force in 3 axes)
-        f_wall = np.asarray(force)/50
-        fe[0] = f_wall[0]
-        fe[1] = -f_wall[1]
         print("Received data from address: ", address)
         print("Force: ", force)
         send_data = bytearray(struct.pack("=%sf" % position.size, *position))  # convert array of 3 floats to bytes
@@ -153,11 +151,8 @@ class PA:
         # pygame.draw.line(self.graphics.screenHaptics, (0,0,0), [0,0], [50,50]*int(fe/30), 5)
 
 
-        vel = np.clip(vel, -3000, 3000)
 
-        xh[0] = np.clip(xh[0],30,400)
-        xh[1] = np.clip(xh[1],30, 600)
-
+        fe = np.array(force)/3000
         fe = np.clip(fe, -3, 3)
 
         ##############################################
@@ -179,6 +174,7 @@ class PA:
         self.physics.close()
 
 if __name__=="__main__":
+    os.environ['SDL_VIDEO_WINDOW_POS'] = "50,50"
     pa = PA()
     try:
         while True:
