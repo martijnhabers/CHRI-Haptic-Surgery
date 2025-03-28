@@ -133,9 +133,8 @@ class PA:
 
         recv_data, address = self.recv_sock.recvfrom(12)  # receive data with buffer size of 12 bytes
         force = struct.unpack("2f", recv_data)  # convert the received data from bytes to an array of 2 floats
-        # f_wall = np.asarray(force)/50
-        # fe[0] = f_wall[0]
-        # fe[1] = -f_wall[1]
+        fe = np.array(force) / 500  # convert the force to a numpy array
+        fe[1] = -fe[1]  # invert the y-axis force
         print("Received data from address: ", address)
         print("Force: ", force)
 

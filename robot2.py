@@ -48,6 +48,8 @@ window_height = 600
 
 offset = 200
 
+
+
 object_dict = {
     # format: 'name': {'color': (R, G, B), 'rect': pygame.Rect(x_tl, y_tl, width, height), 'force': breaking force}
     'heart': {'color': (255, 0, 0), 'rect': pygame.Rect(300, 300 + offset, 75, 125), 'force': 25},
@@ -59,6 +61,37 @@ object_dict = {
     'tissue': {'color': (255, 182, 193), 'rect': pygame.Rect(0, 300 + offset, window_width, 50), 'force': 0},
     'muscle': {'color': (96, 5, 33), 'rect': pygame.Rect(0, 350 + offset, window_width, 50), 'force': 0},
 }
+
+materials = {
+    "heart" : {"color": (255, 0, 0), "force": 25},
+    "tumor" : {"color": (255, 120, 255), "force": 5},
+    "skin" : {"color": (186, 154, 127), "force": 150},
+    "bone" : {"color": (240, 240, 240), "force": 400},
+    # "tissue" : {"color": (255, 182, 193), "force": 0},
+    # "muscle" : {"color": (96, 5, 33), "force": 0},
+    # "lung" : {"color": (255, 255, 0), "force": 0},
+    # "fat" : {"color": (255, 140, 0), "force": 0},
+    # "nerve" : {"color": (0, 255, 0), "force": 0},
+}
+
+def generate_random_object_configurations(num_layers, materials=materials):
+    object_dict = {}
+    y_height = 0
+    material_keys = list(materials.keys())  # Get the keys of the materials dictionary
+    for i in range(num_layers):
+        layer_name = f'layer_{i}'
+        selected_material = random.choice(material_keys)  # Randomly select a material
+        material = materials[selected_material]  # Get the material properties
+        color = material["color"]
+        force = material["force"]
+        height = random.randrange(50, 150, 25)  # Random height for the layer
+        rect = pygame.Rect(0, y_height, window_width, height)
+        y_height += height
+        object_dict[layer_name] = {'color': color, 'rect': rect, 'force': force}
+    return object_dict
+
+# Generate random object configurations, for training
+object_dict = generate_random_object_configurations(8)
 
 # object dict one big square in the middle
 # object_dict = {
@@ -109,9 +142,6 @@ def generate_occupancy_grid(split_object_dict):
 
 occupancy_grid = generate_occupancy_grid(split_object_dict)
 
-print(occupancy_grid)
-
-
 def in_collision_with_grid(pr):
     if pr[0] < 0 or pr[0] > 800 - EE_width - 1 or pr[1] < 0 or pr[1] > 600 - EE_height - 1:
         return False
@@ -121,7 +151,6 @@ def in_collision_with_grid(pr):
         return False
     else:
         return True
-
 
 def pygame_controls():
     for event in pygame.event.get():  # interrupt function
@@ -160,18 +189,6 @@ def pygame_controls():
 
             Kd = 2 * np.sqrt(Ks * m)  # damping in the endpoint stiffness frame [N/m-1]
 
-
-# Set up sockets
-send_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)  # create a send socket
-recv_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)  # create a receive socket
-recv_sock.bind(("localhost", 40002))  # bind the socket to port 40002
-
-# Send dummy data
-force = np.array([0.0, 0.0])
-send_data = bytearray(struct.pack("=%sf" % force.size, *force))  # convert array of 3 floats to bytes
-send_sock.sendto(send_data, ("localhost", 40001))  # send to IP address 192.168.0.3 and port 40001
-
-
 def render():
     window.fill((255, 255, 255))  # clear window
 
@@ -183,6 +200,9 @@ def render():
     if p_potential is not None:
         pygame.draw.rect(window, (0, 255, 0), (p_potential[0], p_potential[1], EE_width, EE_height))
 
+    if force_breaking_vector is not None:
+        pygame.draw.rect(window, (255, 0, 0), (p[0] + force_breaking_vector[0], p[1] + force_breaking_vector[1], EE_width, EE_height))
+
     # draw a small square at position "pr"
     pygame.draw.rect(window, (0, 0, 255), (pr[0], pr[1], EE_width, EE_height))
 
@@ -190,12 +210,15 @@ def render():
 
 
 def receive_udp():
-    pass
+    recv_data, address = recv_sock.recvfrom(12)  # receive data with buffer size of 12 bytes
+    position = struct.unpack("2f", recv_data)  # convert the received data from bytes to an array of 3 floats (assuming force in 3 axes
+    return position
 
-
-def send_udp():
-    pass
-
+def send_udp(force):
+    # Send Force over UDP
+    force = np.array(F)
+    send_data = bytearray(struct.pack("=%sf" % force.size, *force))  # convert array of 3 floats to bytes
+    send_sock.sendto(send_data, ("localhost", 40001))  # send to IP address 192.168.0.3 and port 40001
 
 def bresenham_line(x0, y0, x1, y1):
     """Bresenham's Line Algorithm to generate points on a line."""
@@ -229,17 +252,27 @@ def has_line_of_sight(p, pr, occupancy_grid):
             return False
     return True
 
+def calculate_forces(pr,p,dp,Ks,Kd):
+    spring_force = - np.dot(Ks, (pr - p))
+    damping_force = - np.dot(Kd, (np.zeros(2) - dp))
+    total_force = spring_force + damping_force
+    total_force[0] = - total_force[0]  # Invert x force
+    return total_force
 
-collision_counter = 0
+# Set up sockets, UDP communication
+send_sock = socket.socket(socket.AF_INET,socket.SOCK_DGRAM) # create a send socket
+recv_sock = socket.socket(socket.AF_INET,socket.SOCK_DGRAM) # create a receive socket
+recv_sock.bind(("localhost", 40002)) # bind the socket to port 40002
+
+# Send dummy data, to initialize the connection
+force = F
+send_data = bytearray(struct.pack("=%sf" % force.size, *force))  # convert array of 3 floats to bytes
+send_sock.sendto(send_data, ("localhost", 40001))  # send to IP address 192.168.0.3 and port 40001
 
 run = True
 while run:
     pygame_controls()
-
-    # Receive Position from UDP
-    recv_data, address = recv_sock.recvfrom(12)  # receive data with buffer size of 12 bytes
-    position = struct.unpack("2f",
-                             recv_data)  # convert the received data from bytes to an array of 3 floats (assuming force in 3 axes
+    position = receive_udp()
 
     # Set position if no collision
     prev_p = p
@@ -249,18 +282,16 @@ while run:
     pr[1] *= 600 / 400
     pr = np.int32(pr)
 
-    spring_force = - np.dot(Ks, (pr - p))
-    damping_force = - np.dot(Kd, (np.zeros(2) - dp))
-
-    # Scale because otherwise the force makes the robot unstable
-    F = (spring_force + damping_force) / 1000
-    F[0] = - F[0]
+    # Find spring and damping forces
+    F = calculate_forces(pr, p, dp, Ks, Kd) / 1000
 
     # boolean is first collision
 
     if not in_collision_with_grid(pr) and has_line_of_sight(p, pr, occupancy_grid):
         #### IF NO COLLISION ####
         p = pr
+        p_potential = None
+        force_breaking_vector = None
     else:
         #### IF COLLISION ####
         err = pr - p
@@ -281,7 +312,7 @@ while run:
         direction = err / np.linalg.norm(err)
 
         # check with added buffer in direction of collision
-        p_potential = p + np.int32(EE_width * 2 * (direction / np.linalg.norm(direction)))
+        p_potential = p + np.int32(1.5*(x_steps/EE_width)*(direction / np.linalg.norm(direction)))
 
         key_to_pop = str(int(occupancy_grid[p_potential[0], p_potential[1]]))
         # check if key exists in split_object_dict
@@ -289,8 +320,13 @@ while run:
             pg_rect = split_object_dict[key_to_pop]['rect']
             breaking_force = split_object_dict[key_to_pop]['force']
 
+            # distance_to_break
+            distance_to_break = breaking_force / Ks[0,0]
+            force_breaking_vector = np.array([distance_to_break, distance_to_break])
+            force_breaking_vector = np.diag(force_breaking_vector) @ direction
+
             print("Breaking force: ", breaking_force)
-            print("Force: ", round(np.linalg.norm(F)))
+            print("Force: ", round(np.linalg.norm(Ks @ direction)))
 
             if np.linalg.norm(F) > breaking_force:
                 tl_x, tl_y = pg_rect.topleft
@@ -298,15 +334,7 @@ while run:
                 occupancy_grid[tl_x:br_x, tl_y:br_y] = 0
                 split_object_dict.pop(key_to_pop)
 
-    # if position.ndim == 1:
-    #     position = np.expand_dims(position, axis=1)
-    # position = np.vstack((position, np.ones((1, position.shape[1]))))
-
-    # Send Force over UDP
-    force = np.array(F)
-    send_data = bytearray(struct.pack("=%sf" % force.size, *force))  # convert array of 3 floats to bytes
-    send_sock.sendto(send_data, ("localhost", 40001))  # send to IP address 192.168.0.3 and port 40001
-
+    send_udp(F)
     render()
 
     if run == False:
