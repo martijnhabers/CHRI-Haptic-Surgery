@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import select
 import sys
 import math
 import time
@@ -75,13 +76,6 @@ class PA:
         send_data = bytearray(struct.pack("=%sf" % position.size, *position))  # convert array of 3 floats to bytes
         self.send_sock.sendto(send_data, ("localhost", 40002))  # send to IP address 192.168.0.3 and port 40001
 
-
-        self.object_dict = {
-            'skin': {'color': (186, 154, 127), 'rect': pygame.Rect(0, 100, 600, 50), 'force': 0},
-            'bone': {'color': (255, 5, 127), 'rect': pygame.Rect(0, 200, 600, 50), 'force': 0},
-            'heart': {'color': (255, 0, 0), 'rect': pygame.Rect(300, 350, 50, 50), 'force': 0},
-        }
-
         ##############################################
     
     def run(self):
@@ -137,12 +131,14 @@ class PA:
 
         f_damper = vel * self.b_virt
 
-
-        # Send position data and receive Force data
         recv_data, address = self.recv_sock.recvfrom(12)  # receive data with buffer size of 12 bytes
-        force = struct.unpack("2f", recv_data)  # convert the received data from bytes to an array of 3 floats (assuming force in 3 axes)
+        force = struct.unpack("2f", recv_data)  # convert the received data from bytes to an array of 2 floats
+        # f_wall = np.asarray(force)/50
+        # fe[0] = f_wall[0]
+        # fe[1] = -f_wall[1]
         print("Received data from address: ", address)
         print("Force: ", force)
+
         send_data = bytearray(struct.pack("=%sf" % position.size, *position))  # convert array of 3 floats to bytes
         self.send_sock.sendto(send_data, ("localhost", 40002))  # send to IP address 192.168.0.3 and port 40001
 
@@ -163,7 +159,7 @@ class PA:
             pos_phys = g.inv_convert_pos(xh)
             pA0,pB0,pA,pB,pE = p.derive_device_pos(pos_phys) #derive the pantograph joint positions given some endpoint position
             pA0,pB0,pA,pB,xh = g.convert_pos(pA0,pB0,pA,pB,pE) #convert the physical positions to screen coordinates
-        g.render(pA0,pB0,pA,pB,xh,fe,xm, self.object_dict)
+        g.render(pA0,pB0,pA,pB,xh,fe,xm)
         
     def close(self):
         ##############################################
@@ -181,8 +177,3 @@ if __name__=="__main__":
             pa.run()
     finally:
         pa.close()
-
-
-
-
-
