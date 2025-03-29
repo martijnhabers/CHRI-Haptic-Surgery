@@ -239,13 +239,18 @@ def pygame_controls():
 def render():
     window.fill((255, 255, 255))  # clear window
 
+
     for key in split_object_dict:
         pygame.draw.rect(window, split_object_dict[key]['color'], split_object_dict[key]['rect'])
 
     pygame.draw.rect(window, (0, 0, 0), (p[0], p[1], EE_width, EE_height))
     pygame.draw.rect(window, (255, 0, 0), (pr[0], pr[1], int(EE_width/2), int(EE_height/2)))
+    if  int(t) % 4 != 0:
+            window.fill((0, 0, 0))
 
     pygame.display.flip()
+
+    
 
 def should_pop(idd, direction):
     key_to_pop = str(int(idd))
