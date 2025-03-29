@@ -5,6 +5,8 @@ import matplotlib.pyplot as plt
 import pygame
 import socket, struct
 import os
+import csv
+
 
 
 #
@@ -30,13 +32,31 @@ FPS = int(1/dt) # refresh rate
 t = 0.0 # time
 n = 0 # plot
 
-pr = np.zeros(2) # reference endpoint position
-p = np.array([586.0,138.0]) # actual endpoint position
-p_prev = np.zeros(2) # previous endpoint position
+p = np.zeros(2, dtype=float) # actual endpoint position
+
+pr = np.array([300.0, 100.0])# reference endpoint position
+pr[0] = pr[0]*800/600*1.4 -200
+pr[1] = pr[1]*600/400*1.4 -200
+p = pr
+p_prev = p # previous endpoint position
 dp = np.zeros(2) # actual endpoint velocity
 F = np.zeros(2) # endpoint force
 vel_ema = np.zeros(2)
 alpha = 0.1
+
+# EXPERIMENT SETTINGS
+
+subject_name = "LabRat1"
+maze_name = "maze2.png"
+impedance_control = True
+
+# ------------------------
+
+# Define the filename
+filename = "experiment_results.csv"
+
+total_cost = 0
+blood_clots_removed = 0
 
 m = 0.5 # endpoint mass
 i = 0 # loop counter
@@ -101,7 +121,8 @@ def create_object_dict(maze, cell_size=25):
                     'color': (139, 0, 0),  # Bright red for veins
                     'rect': pygame.Rect(x * cell_size, y * cell_size, cell_size, cell_size),
                     'force': 100 * 100,
-                    'stiffness': 10000
+                    'stiffness': 10000,
+                    'cost': 5
                 }
                 wall_count += 1
 
@@ -110,8 +131,9 @@ def create_object_dict(maze, cell_size=25):
                 object_dict[obj_name] = {
                     'color': (255,192,203),  # Pink
                     'rect': pygame.Rect(x * cell_size, y * cell_size, cell_size, cell_size),
-                    'force': 10 * 100,  # Flesh has different properties
-                    'stiffness': 2000
+                    'force': 100 * 100,  # Flesh has different properties
+                    'stiffness': 5000,
+                    'cost': 1
                 }
                 flesh_count += 1
 
@@ -120,14 +142,15 @@ def create_object_dict(maze, cell_size=25):
                 object_dict[obj_name] = {
                     'color': (255,0,0),  # Red
                     'rect': pygame.Rect(x * cell_size, y * cell_size, cell_size, cell_size),
-                    'force': 100 * 100,
-                    'stiffness': 10000
+                    'force': 100 * 50,
+                    'stiffness': 12000,
+                    'cost': 0
                 }
                 clot_count += 1
 
     return object_dict
 
-img = "maze.png"  # Path to the maze image
+img = maze_name  # Path to the maze image
 maze = generate_maze(img, y_blocks, x_blocks)
 object_dict = create_object_dict(maze)
 
@@ -139,8 +162,9 @@ y_steps = 25
 
 # Generate random object configurations, for training
 # object_dict = generate_random_object_configurations(8)
-
+initial_bloodclots = 0
 def generate_objects(object_dict, x_res, y_res):
+    global initial_bloodclots
     dict = {}
     i = 0
     occupied_pixels = set()
@@ -149,6 +173,7 @@ def generate_objects(object_dict, x_res, y_res):
         color = object_dict[key]['color']
         force = object_dict[key]['force']
         stiffness = object_dict[key]['stiffness']
+        cost = object_dict[key]['cost']
         width = rect.width
         height = rect.height
 
@@ -161,7 +186,9 @@ def generate_objects(object_dict, x_res, y_res):
 
                 if not rect_pixels & occupied_pixels:  # Check for overlap
                     occupied_pixels.update(rect_pixels)
-                    dict[str(int(i))] = {'color': color, 'rect': rect, 'force': force, 'stiffness': stiffness}
+                    dict[str(int(i))] = {'color': color, 'rect': rect, 'force': force, 'stiffness': stiffness, 'cost':cost}
+                    if cost == 0:
+                        initial_bloodclots += 1
                     i += 1
     return dict
 
@@ -245,14 +272,15 @@ def render():
 
     pygame.draw.rect(window, (0, 0, 0), (p[0], p[1], EE_width, EE_height))
     pygame.draw.rect(window, (255, 0, 0), (pr[0], pr[1], int(EE_width/2), int(EE_height/2)))
-    if  int(t) % 4 != 0:
-            window.fill((0, 0, 0))
+    if int(t) % 4 != 0:
+            pass#window.fill((0, 0, 0))
 
     pygame.display.flip()
 
     
 
 def should_pop(idd, direction):
+    global total_cost, blood_clots_removed
     key_to_pop = str(int(idd))
     # check if key exists in split_object_dict
     if key_to_pop in split_object_dict:
@@ -267,6 +295,10 @@ def should_pop(idd, direction):
             tl_x, tl_y = pg_rect.topleft
             br_x, br_y = pg_rect.bottomright
             occupancy_grid[tl_x:br_x, tl_y:br_y] = 0
+            cost = split_object_dict[key_to_pop]["cost"]
+            total_cost += cost
+            if cost == 0:
+                blood_clots_removed += 1
             split_object_dict.pop(key_to_pop)
             print("Popped ID: ", key_to_pop)
             print("Breaking force (x,y): ", Fx, Fy)
@@ -276,6 +308,10 @@ def should_pop(idd, direction):
             tl_x, tl_y = pg_rect.topleft
             br_x, br_y = pg_rect.bottomright
             occupancy_grid[tl_x:br_x, tl_y:br_y] = 0
+            cost = split_object_dict[key_to_pop]["cost"]
+            total_cost += cost
+            if cost == 0:
+                blood_clots_removed += 1
             split_object_dict.pop(key_to_pop)
             print("Popped ID: ", key_to_pop)
             print("Breaking force (x,y): ", Fx, Fy)
@@ -308,11 +344,15 @@ def receive_udp():
     position = struct.unpack("2f", recv_data)  # convert the received data from bytes to an array of 3 floats (assuming force in 3 axes
     return position
 
-def send_udp(force):
+def send_udp(F):
     # Send Force over UDP
-    force = np.array(F)
+    force = F
     send_data = bytearray(struct.pack("=%sf" % force.size, *force))  # convert array of 3 floats to bytes
     send_sock.sendto(send_data, ("localhost", 40001))  # send to IP address 192.168.0.3 and port 40001
+
+
+
+
 
 time_list, vel_list = [], []
 run = True
@@ -367,56 +407,109 @@ while run:
         Ks = Ks_initial.copy()
         Kd = Kd_initial.copy()
 
+    if impedance_control:
+        processed_ids = set()
+        for direction, (x, y, idd) in collisions.items():
+            if str(int(idd)) in processed_ids:
+                continue
 
-    processed_ids = set()
-    for direction, (x, y, idd) in collisions.items():
-        if str(int(idd)) in processed_ids:
-            continue
+            pg_rect = split_object_dict[str(int(idd))]['rect']
+            tl_x, tl_y = pg_rect.topleft
+            br_x, br_y = pg_rect.bottomright
+            if direction in ["mid-left"]:
+                p[0] = np.clip(p[0], br_x, window_width)
+                dp[0] = 0
+                print("clipping left", x)
+                adjust_stifness(split_object_dict, idd)
+                should_pop(idd, "mid-left")
+                processed_ids.add(str(int(idd)))
+                # p_prev = p.copy()
 
-        pg_rect = split_object_dict[str(int(idd))]['rect']
-        tl_x, tl_y = pg_rect.topleft
-        br_x, br_y = pg_rect.bottomright
-        if direction in ["mid-left"]:
-            p[0] = np.clip(p[0], br_x, window_width)
-            dp[0] = 0
-            print("clipping left", x)
-            adjust_stifness(split_object_dict, idd)
-            should_pop(idd, "mid-left")
+            elif direction in ["mid-right"]: #, "top-right", "bottom-right"
+                p[0] = np.clip(p[0], 0, tl_x-EE_width)
+                dp[0] = 0
+                print("clipping right", x)
+                adjust_stifness(split_object_dict, idd)
+                should_pop(idd, "mid-right")
+                processed_ids.add(str(int(idd)))
+                # p_prev = p.copy()
+
+            if direction in ["mid-top"]: #, "top-left", "top-right"
+                p[1] = np.clip(p[1], br_y, window_height)
+                dp[1] = 0
+                print("clipping top", y)
+                adjust_stifness(split_object_dict, idd)
+                should_pop(idd, "mid-top")
+                processed_ids.add(str(int(idd)))
+                # p_prev = p.copy()
+
+            elif direction in ["mid-bottom"]:
+                p[1] = np.clip(p[1], 0, tl_y-EE_height)
+                dp[1] = 0
+                print("clipping bot", y)
+                adjust_stifness(split_object_dict, idd)
+                should_pop(idd, "mid-bottom")
+                processed_ids.add(str(int(idd)))
+                # p_prev = p.copy()
+    else:
+        processed_ids = set()
+        p = pr
+        p[0] = np.clip(p[0], 0, window_width - EE_width - 5)
+        p[1] = np.clip(p[1], 0, window_height - EE_height - 5)
+        collisions = check_collision(p, occupancy_grid, buffer=-1)
+        for direction, (x, y, idd) in collisions.items():
+            if str(int(idd)) in processed_ids:
+                continue
+            idd = str(int(idd))
+            pg_rect = split_object_dict[idd]['rect']
+            breaking_force = split_object_dict[idd]['force']
+            tl_x, tl_y = pg_rect.topleft
+            br_x, br_y = pg_rect.bottomright
+            occupancy_grid[tl_x:br_x, tl_y:br_y] = 0
+            cost = split_object_dict[idd]["cost"]
+            total_cost += cost
+            if cost == 0:
+                blood_clots_removed += 1
+            split_object_dict.pop(idd)
             processed_ids.add(str(int(idd)))
-            # p_prev = p.copy()
 
-        elif direction in ["mid-right"]: #, "top-right", "bottom-right"
-            p[0] = np.clip(p[0], 0, tl_x-EE_width)
-            dp[0] = 0
-            print("clipping right", x)
-            adjust_stifness(split_object_dict, idd)
-            should_pop(idd, "mid-right")
-            processed_ids.add(str(int(idd)))
-            # p_prev = p.copy()
 
-        if direction in ["mid-top"]: #, "top-left", "top-right"
-            p[1] = np.clip(p[1], br_y, window_height)
-            dp[1] = 0
-            print("clipping top", y)
-            adjust_stifness(split_object_dict, idd)
-            should_pop(idd, "mid-top")
-            processed_ids.add(str(int(idd)))
-            # p_prev = p.copy()
-
-        elif direction in ["mid-bottom"]:
-            p[1] = np.clip(p[1], 0, tl_y-EE_height)
-            dp[1] = 0
-            print("clipping bot", y)
-            adjust_stifness(split_object_dict, idd)
-            should_pop(idd, "mid-bottom")
-            processed_ids.add(str(int(idd)))
-            # p_prev = p.copy()
         
     vel_list.append(dp_dt)
     time_list.append(t)
-    send_udp(F)
+    if impedance_control:
+        send_udp(F)
+    else:
+        print("pula force")
+        send_udp(np.zeros(2, dtype=float)) # No force feedback in position control
+
+
+
     render()
     pygame_controls()
+
+    # GAME END CODE #
+    if blood_clots_removed == initial_bloodclots:
+        print("----- WELL DONE, GAME FINISHED -------")
+        print("Total cost: ", total_cost)
+        print("Time to complete: ", t)
+
+        # Define the data row
+        data = [subject_name, maze_name, impedance_control, t, total_cost]
+
+        # Check if the file exists to write headers
+        write_header = not os.path.exists(filename)
+
+        # Write data to CSV
+        with open(filename, mode="a", newline="") as file:
+            writer = csv.writer(file)
+            if write_header:
+                writer.writerow(["subject_name", "maze_name", "impedance_control", "t_to_completion", "cost_final"])
+            writer.writerow(data)
+
+        run = False
+        print("---------------------------------------")
+
 
     if run == False:
         plt.plot(time_list, vel_list)
