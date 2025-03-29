@@ -56,78 +56,42 @@ Kd = Kd_initial.copy()
 window_width = 800
 window_height = 600
 
-x_blocks = int(window_width/EE_width)
-y_blocks = int(window_height/EE_height)
+x_steps = 25
+y_steps = 25
+
+x_blocks = int(window_width/x_steps)
+y_blocks = int(window_height/y_steps)
 
 np.set_printoptions(threshold=np.inf)
 print(x_blocks)
 print(y_blocks)
 
-def generate_maze(y_blocks, x_blocks):
-    # Start with a maze full of flesh (2)
-    maze = np.full((y_blocks, x_blocks), 2, dtype=int)
 
-    for dir in [np.array([1, 0]), np.array([0, 1])]:
-        start = [5, x_blocks//2]
-        for dy in range(-1, 2):
-            for dx in range(-1, 2):
-                ny, nx = start[0] + dy, start[1] + dx
-                if 0 <= ny < y_blocks and 0 <= nx < x_blocks:  # Ensure within bounds
-                    maze[ny, nx] = 0
-
-        # Random initial direction
-
-        pos = np.array([start[0], start[1]])
-
-        # Create initial tunnel (3 steps forward)
-        for _ in range(3):
-            maze[pos[0], pos[1]] = 0
-            pos = pos + dir
-            pos[0] = np.clip(pos[0], 2, y_blocks - 3)  # Keep inside bounds
-            pos[1] = np.clip(pos[1], 2, x_blocks - 3)
-
-        # Create more tunnels
-        for _ in range(300):
-            if random.random() < 0.1:  # 5% chance to change direction
-                if tuple(dir) in [(1, 0), (-1, 0)]:
-                    dir = random.choice([np.array([0, 1]), np.array([0, -1])])
-                else:
-                    dir = random.choice([np.array([1, 0]), np.array([-1, 0])])
-
-            maze[pos[0], pos[1]] = 0
-            pos = pos + dir
-            pos[0] = np.clip(pos[0], 2, y_blocks - 3)
-            pos[1] = np.clip(pos[1], 2, x_blocks - 3)
-
-    # Step 1: Add first layer of vein walls (1-block thick)
-    for y in range(1, y_blocks - 1):
-        for x in range(1, x_blocks - 1):
-            if maze[y, x] == 2:  # Flesh cells only
-                neighbors = [(y + 1, x), (y - 1, x), (y, x + 1), (y, x - 1)]
-                if any(maze[ny, nx] == 0 for ny, nx in neighbors):
-                    maze[y, x] = 1  # Convert flesh to vein wall if next to free space
-
-    # Step 2: Expand vein walls to be 2 blocks thick **without touching free space (0)**
-    new_vein_walls = []
-    for y in range(1, y_blocks - 1):
-        for x in range(1, x_blocks - 1):
-            if maze[y, x] == 2:  # Flesh cells only
-                neighbors = [(y + 1, x), (y - 1, x), (y, x + 1), (y, x - 1)]
-                if any(maze[ny, nx] == 1 for ny, nx in neighbors):
-                    new_vein_walls.append((y, x))  # Store these to update later
-
-    # Apply the new vein walls **after scanning** to avoid overwriting during iteration
-    for y, x in new_vein_walls:
-        maze[y, x] = 1
-
+def generate_maze(img, y_blocks, x_blocks):
+    image = pygame.image.load(img)
+    # convert to array
+    image_array = pygame.surfarray.array3d(image)
+    # if pixel is white, set to 0
+    maze = np.zeros((y_blocks, x_blocks))
+    for y in range(y_blocks):
+        for x in range(x_blocks):
+            pixel = image_array[x, y]
+            # if pixel is red (255, 0, 0), set to 1
+            if pixel[0] == 255 and pixel[1] == 0 and pixel[2] == 0:
+                maze[y, x] = 1
+            # if pixel is green (0, 255, 0), set to 2
+            elif pixel[0] == 0 and pixel[1] == 255 and pixel[2] == 0:
+                maze[y, x] = 2
+            # if pixel is blue (0, 0, 255), set to 3
+            elif pixel[0] == 0 and pixel[1] == 0 and pixel[2] == 255:
+                maze[y, x] = 3
     return maze
-
-
 
 def create_object_dict(maze, cell_size=25):
     object_dict = {}
     wall_count = 1  # Counter for naming vein walls
     flesh_count = 1  # Counter for naming flesh blocks
+    clot_count = 1  # Counter for naming blood clots
 
     for y in range(maze.shape[0]):
         for x in range(maze.shape[1]):
@@ -151,9 +115,20 @@ def create_object_dict(maze, cell_size=25):
                 }
                 flesh_count += 1
 
+            elif maze[y, x] == 3:  # Blood clot
+                obj_name = f'blood_clot{clot_count}'
+                object_dict[obj_name] = {
+                    'color': (255,0,0),  # Red
+                    'rect': pygame.Rect(x * cell_size, y * cell_size, cell_size, cell_size),
+                    'force': 100 * 100,
+                    'stiffness': 10000
+                }
+                clot_count += 1
+
     return object_dict
 
-maze = generate_maze(y_blocks, x_blocks)
+img = "maze.png"  # Path to the maze image
+maze = generate_maze(img, y_blocks, x_blocks)
 object_dict = create_object_dict(maze)
 
 
@@ -226,7 +201,6 @@ def check_collision(p, occupancy_grid, buffer=0):
             collisions[alias] = (x, y, int(collision_id))
 
     return collisions  # Dictionary of alias -> coordinate
-
 
 def pygame_controls():
     for event in pygame.event.get(): # interrupt function
