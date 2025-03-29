@@ -31,4 +31,5 @@ try:
     while True:
         time.sleep(1)
 except KeyboardInterrupt:
-    cleanup_and_exit(None, None)
+    pass
+    # cleanup_and_exit(None, None)

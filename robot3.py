@@ -6,6 +6,7 @@ import pygame
 import socket, struct
 import os
 
+
 #
 dt = 0.01 # intergration step timedt = 0.01 # integration step time
 os.environ['SDL_VIDEO_WINDOW_POS'] = "1000,400"
@@ -30,7 +31,7 @@ t = 0.0 # time
 n = 0 # plot
 
 pr = np.zeros(2) # reference endpoint position
-p = np.array([50.0,50.0]) # actual endpoint position
+p = np.array([586.0,138.0]) # actual endpoint position
 p_prev = np.zeros(2) # previous endpoint position
 dp = np.zeros(2) # actual endpoint velocity
 F = np.zeros(2) # endpoint force
@@ -51,18 +52,19 @@ Kd = 2*np.sqrt(Ks * m)*10# damping in the endpoint stiffness frame [N/ms-1]
 window_width = 800
 window_height = 600
 
-offset = 300
-#TODO: add stiffnesses if you use the original object_dict
+offset = 400
+
 object_dict = {
-    # format: 'name': {'color': (R, G, B), 'rect': pygame.Rect(x_tl, y_tl, width, height), 'force': breaking force}
-    'heart': {'color': (255, 0, 0), 'rect': pygame.Rect(300, 300 + offset, 75, 125), 'force': 25*100},
-    'heart2': {'color': (255, 0, 0), 'rect': pygame.Rect(450, 300 + offset, 75, 125), 'force': 25*100},
-    'tumor': {'color': (255, 120, 255), 'rect': pygame.Rect(425, 350 + offset, 50, 50), 'force': 5*100},
-    'skin': {'color': (186, 154, 127), 'rect': pygame.Rect(0, offset, window_width, 250), 'force': 150*100},
-    'bone': {'color': (240, 240, 240), 'rect': pygame.Rect(0, 250 + offset, window_width, 50), 'force': 300*100},
-    'tissue': {'color': (255, 182, 193), 'rect': pygame.Rect(0, 300 + offset, window_width, 50), 'force': 0},
-    'muscle': {'color': (96, 5, 33), 'rect': pygame.Rect(0, 350 + offset, window_width, 50), 'force': 0},
+    # format: 'name': {'color': (R, G, B), 'rect': pygame.Rect(x_tl, y_tl, width, height), 'force': breaking force, 'stiffness': material stiffness}
+    'heart': {'color': (255, 0, 0), 'rect': pygame.Rect(300, 300 + offset, 75, 125), 'force': 25*100, "stiffness": 3000},
+    'heart2': {'color': (255, 0, 0), 'rect': pygame.Rect(450, 300 + offset, 75, 125), 'force': 25*100, "stiffness": 3000},
+    'tumor': {'color': (255, 120, 255), 'rect': pygame.Rect(425, 350 + offset, 50, 50), 'force': 5*100, "stiffness": 3000},
+    'skin': {'color': (186, 154, 127), 'rect': pygame.Rect(0, offset, window_width/2, 250), 'force': 150*100,"stiffness": 3000},
+    'bone': {'color': (240, 240, 240), 'rect': pygame.Rect(0, 250 + offset, window_width/2, 50), 'force': 300*100,"stiffness": 3000},
+    'tissue': {'color': (255, 182, 193), 'rect': pygame.Rect(0, 300 + offset, window_width/2, 50), 'force': 150*100,"stiffness": 3000},
+    'muscle': {'color': (96, 5, 33), 'rect': pygame.Rect(0, 350 + offset, window_width, 50), 'force': 150*100,"stiffness": 3000},
 }
+
 
 materials = {
     "heart" : {"color": (255, 0, 0), "force": 25*50, "stiffness": 3000},
@@ -75,6 +77,111 @@ materials = {
     # "fat" : {"color": (255, 140, 0), "force": 0},
     # "nerve" : {"color": (0, 255, 0), "force": 0},
 }
+
+x_blocks = int(window_width/EE_width)
+y_blocks = int(window_height/EE_height)
+
+np.set_printoptions(threshold=np.inf)
+print(x_blocks)
+print(y_blocks)
+
+
+
+
+
+
+def generate_maze(y_blocks, x_blocks):
+    # Start with a maze full of flesh (2)
+    maze = np.full((y_blocks, x_blocks), 2, dtype=int)
+
+    for dir in [np.array([1, 0]), np.array([0, 1])]:
+        start = [5, x_blocks//2]
+        for dy in range(-1, 2):
+            for dx in range(-1, 2):
+                ny, nx = start[0] + dy, start[1] + dx
+                if 0 <= ny < y_blocks and 0 <= nx < x_blocks:  # Ensure within bounds
+                    maze[ny, nx] = 0
+
+        # Random initial direction
+
+        pos = np.array([start[0], start[1]])
+
+        # Create initial tunnel (3 steps forward)
+        for _ in range(3):
+            maze[pos[0], pos[1]] = 0
+            pos = pos + dir
+            pos[0] = np.clip(pos[0], 2, y_blocks - 3)  # Keep inside bounds
+            pos[1] = np.clip(pos[1], 2, x_blocks - 3)
+
+        # Create more tunnels
+        for _ in range(300):
+            if random.random() < 0.1:  # 5% chance to change direction
+                if tuple(dir) in [(1, 0), (-1, 0)]:
+                    dir = random.choice([np.array([0, 1]), np.array([0, -1])])
+                else:
+                    dir = random.choice([np.array([1, 0]), np.array([-1, 0])])
+
+            maze[pos[0], pos[1]] = 0
+            pos = pos + dir
+            pos[0] = np.clip(pos[0], 2, y_blocks - 3)
+            pos[1] = np.clip(pos[1], 2, x_blocks - 3)
+
+    # Step 1: Add first layer of vein walls (1-block thick)
+    for y in range(1, y_blocks - 1):
+        for x in range(1, x_blocks - 1):
+            if maze[y, x] == 2:  # Flesh cells only
+                neighbors = [(y + 1, x), (y - 1, x), (y, x + 1), (y, x - 1)]
+                if any(maze[ny, nx] == 0 for ny, nx in neighbors):
+                    maze[y, x] = 1  # Convert flesh to vein wall if next to free space
+
+    # Step 2: Expand vein walls to be 2 blocks thick **without touching free space (0)**
+    new_vein_walls = []
+    for y in range(1, y_blocks - 1):
+        for x in range(1, x_blocks - 1):
+            if maze[y, x] == 2:  # Flesh cells only
+                neighbors = [(y + 1, x), (y - 1, x), (y, x + 1), (y, x - 1)]
+                if any(maze[ny, nx] == 1 for ny, nx in neighbors):
+                    new_vein_walls.append((y, x))  # Store these to update later
+
+    # Apply the new vein walls **after scanning** to avoid overwriting during iteration
+    for y, x in new_vein_walls:
+        maze[y, x] = 1
+
+    return maze
+
+
+
+def create_object_dict(maze, cell_size=25):
+    object_dict = {}
+    wall_count = 1  # Counter for naming vein walls
+    flesh_count = 1  # Counter for naming flesh blocks
+
+    for y in range(maze.shape[0]):
+        for x in range(maze.shape[1]):
+            if maze[y, x] == 1:  # Vein Wall
+                obj_name = f'vein_wall{wall_count}'
+                object_dict[obj_name] = {
+                    'color': (139, 0, 0),  # Bright red for veins
+                    'rect': pygame.Rect(x * cell_size, y * cell_size, cell_size, cell_size),
+                    'force': 100 * 100,
+                    'stiffness': 10000
+                }
+                wall_count += 1
+
+            elif maze[y, x] == 2:  # Flesh
+                obj_name = f'flesh{flesh_count}'
+                object_dict[obj_name] = {
+                    'color': (255,192,203),  # Pink
+                    'rect': pygame.Rect(x * cell_size, y * cell_size, cell_size, cell_size),
+                    'force': 10 * 100,  # Flesh has different properties
+                    'stiffness': 1000
+                }
+                flesh_count += 1
+
+    return object_dict
+
+maze = generate_maze(y_blocks, x_blocks)
+object_dict = create_object_dict(maze)
 
 def generate_random_object_configurations(num_layers, materials=materials):
     object_dict = {}
@@ -98,7 +205,7 @@ x_steps = 25
 y_steps = 25
 
 # Generate random object configurations, for training
-object_dict = generate_random_object_configurations(8)
+# object_dict = generate_random_object_configurations(8)
 
 def generate_objects(object_dict, x_res, y_res):
     dict = {}
@@ -217,26 +324,34 @@ def should_pop(idd, direction):
 
         print("Breaking force: ", breaking_force)
         print("Force: ", np.linalg.norm(F))
-        Fx, Fy = F
+        Fx, Fy = F_spring
+        print(Fx, Fy)
         if abs(Fx) > breaking_force and direction in ["mid-left", "mid-right"]:
             tl_x, tl_y = pg_rect.topleft
             br_x, br_y = pg_rect.bottomright
             occupancy_grid[tl_x:br_x, tl_y:br_y] = 0
             split_object_dict.pop(key_to_pop)
+            print("Popped ID: ", key_to_pop)
+            print("Breaking force (x,y): ", Fx, Fy)
+            print("Damping force: ", F_damper)
 
         if abs(Fy) > breaking_force and direction in ["mid-top", "mid-bottom"]:
             tl_x, tl_y = pg_rect.topleft
             br_x, br_y = pg_rect.bottomright
             occupancy_grid[tl_x:br_x, tl_y:br_y] = 0
             split_object_dict.pop(key_to_pop)
+            print("Popped ID: ", key_to_pop)
+            print("Breaking force (x,y): ", Fx, Fy)
+            print("Damping force: ", F_damper)
 
     else:
         print(f"Key {key_to_pop} not found in split_object_dict.")
 
 def adjust_stifness(object_dict, idd):
-    global Ks
+    global Ks, Kd
     material_stifness = object_dict[str(int(idd))]['stiffness']
     Ks = np.diag([material_stifness, material_stifness])
+    Kd = 2 * np.sqrt(Ks * m) * 10
 
 
 # Set up sockets
@@ -260,6 +375,7 @@ def send_udp(force):
     send_data = bytearray(struct.pack("=%sf" % force.size, *force))  # convert array of 3 floats to bytes
     send_sock.sendto(send_data, ("localhost", 40001))  # send to IP address 192.168.0.3 and port 40001
 
+time_list, vel_list = [], []
 run = True
 while run:
     pygame_controls()
@@ -275,6 +391,7 @@ while run:
     derr_dt = (er - er_prev) / dt  # derr/dt
 
     dp_dt = (p - p_prev)/dt
+    # dp_dt = np.clip(dp_dt, -1000, 1000)
     p_prev = p.copy()
 
     F_spring = -Ks @ er/100
@@ -283,10 +400,10 @@ while run:
     F = F_spring + F_damper
     F = -F
     if n > 100:
-        print("velocity: ", derr_dt)
-        print("F_spring: ", F_spring)
-        print("F_damper: ", F_damper)
-        print("Force: ", F)
+        # print("velocity: ", derr_dt)
+        # print("F_spring: ", F_spring)
+        # print("F_damper: ", F_damper)
+        # print("Force: ", F)
         n = 0
     n += 1
 
@@ -301,6 +418,7 @@ while run:
     collisions = check_collision(p, occupancy_grid, buffer=1)
     if len(collisions) == 0:
         Ks = Ks_initial.copy()
+        Kd = 2 * np.sqrt(Ks * m) * 10
 
     processed_ids = set()
     for direction, (x, y, idd) in collisions.items():
@@ -310,13 +428,14 @@ while run:
         pg_rect = split_object_dict[str(int(idd))]['rect']
         tl_x, tl_y = pg_rect.topleft
         br_x, br_y = pg_rect.bottomright
-        if direction in ["mid-left"]: #,"top-left", "bottom-left"
+        if direction in ["mid-left"]:
             p[0] = np.clip(p[0], br_x, window_width)
             dp[0] = 0
             print("clipping left", x)
             adjust_stifness(split_object_dict, idd)
             should_pop(idd, "mid-left")
             processed_ids.add(str(int(idd)))
+            p_prev = p.copy()
 
         elif direction in ["mid-right"]: #, "top-right", "bottom-right"
             p[0] = np.clip(p[0], 0, tl_x-EE_width)
@@ -325,6 +444,7 @@ while run:
             adjust_stifness(split_object_dict, idd)
             should_pop(idd, "mid-right")
             processed_ids.add(str(int(idd)))
+            p_prev = p.copy()
 
         if direction in ["mid-top"]: #, "top-left", "top-right"
             p[1] = np.clip(p[1], br_y, window_height)
@@ -333,20 +453,26 @@ while run:
             adjust_stifness(split_object_dict, idd)
             should_pop(idd, "mid-top")
             processed_ids.add(str(int(idd)))
+            p_prev = p.copy()
 
-        elif direction in ["mid-bottom"]: #, "bottom-left", "bottom-right"
+        elif direction in ["mid-bottom"]:
             p[1] = np.clip(p[1], 0, tl_y-EE_height)
             dp[1] = 0
             print("clipping bot", y)
             adjust_stifness(split_object_dict, idd)
             should_pop(idd, "mid-bottom")
             processed_ids.add(str(int(idd)))
+            p_prev = p.copy()
         
-
+    vel_list.append(dp_dt)
+    time_list.append(t)
     send_udp(F)
     render()
+    pygame_controls()
 
     if run == False:
+        plt.plot(time_list, vel_list)
+        plt.show()
         break
 
 pygame.quit() # stop pygame

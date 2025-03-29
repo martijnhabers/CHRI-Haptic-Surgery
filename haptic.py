@@ -72,7 +72,7 @@ class PA:
         self.send_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)  # create a send socket
 
         # Send dummy data
-        position = np.array([100, 100])
+        position = np.array([380, 92])
         send_data = bytearray(struct.pack("=%sf" % position.size, *position))  # convert array of 3 floats to bytes
         self.send_sock.sendto(send_data, ("localhost", 40002))  # send to IP address 192.168.0.3 and port 40001
 
