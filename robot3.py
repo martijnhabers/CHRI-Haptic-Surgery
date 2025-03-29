@@ -20,7 +20,7 @@ font = pygame.font.Font('freesansbold.ttf', 12) # printing text font and font si
 text = font.render('robot arm', True, (0, 0, 0), (255, 255, 255)) # printing text object
 textRect = text.get_rect()
 textRect.topleft = (10, 10) # printing text position with respect to the top-left corner of the window
-EE_width, EE_height = 20, 20
+EE_width, EE_height = 16, 16
 
 clock = pygame.time.Clock() # initialise clock
 FPS = int(1/dt) # refresh rate
@@ -35,6 +35,8 @@ p = np.array([586.0,138.0]) # actual endpoint position
 p_prev = np.zeros(2) # previous endpoint position
 dp = np.zeros(2) # actual endpoint velocity
 F = np.zeros(2) # endpoint force
+vel_ema = np.zeros(2)
+alpha = 0.1
 
 m = 0.5 # endpoint mass
 i = 0 # loop counter
@@ -43,40 +45,16 @@ orientation = 0  # Stiffness frame orientation
 er = np.zeros(2) # Error
 
 # IMPEDANCE CONTROLLER PARAMETERS
+Kd_scale = 25
 Ks_initial = np.diag([1000.0,1000.0])*10
 Ks = Ks_initial.copy() # stiffness in the endpoint stiffness frame [N/m] 30
-Kd = 2*np.sqrt(Ks * m)*10# damping in the endpoint stiffness frame [N/ms-1]
+Kd_initial = 2*np.sqrt(Ks * m)*Kd_scale# damping in the endpoint stiffness frame [N/ms-1]
+Kd = Kd_initial.copy()
 
 # Kd = np.diag([0.005,0.005])
 
 window_width = 800
 window_height = 600
-
-offset = 400
-
-object_dict = {
-    # format: 'name': {'color': (R, G, B), 'rect': pygame.Rect(x_tl, y_tl, width, height), 'force': breaking force, 'stiffness': material stiffness}
-    'heart': {'color': (255, 0, 0), 'rect': pygame.Rect(300, 300 + offset, 75, 125), 'force': 25*100, "stiffness": 3000},
-    'heart2': {'color': (255, 0, 0), 'rect': pygame.Rect(450, 300 + offset, 75, 125), 'force': 25*100, "stiffness": 3000},
-    'tumor': {'color': (255, 120, 255), 'rect': pygame.Rect(425, 350 + offset, 50, 50), 'force': 5*100, "stiffness": 3000},
-    'skin': {'color': (186, 154, 127), 'rect': pygame.Rect(0, offset, window_width/2, 250), 'force': 150*100,"stiffness": 3000},
-    'bone': {'color': (240, 240, 240), 'rect': pygame.Rect(0, 250 + offset, window_width/2, 50), 'force': 300*100,"stiffness": 3000},
-    'tissue': {'color': (255, 182, 193), 'rect': pygame.Rect(0, 300 + offset, window_width/2, 50), 'force': 150*100,"stiffness": 3000},
-    'muscle': {'color': (96, 5, 33), 'rect': pygame.Rect(0, 350 + offset, window_width, 50), 'force': 150*100,"stiffness": 3000},
-}
-
-
-materials = {
-    "heart" : {"color": (255, 0, 0), "force": 25*50, "stiffness": 3000},
-    "tumor" : {"color": (255, 120, 255), "force": 50*50, "stiffness": 6000},
-    "skin" : {"color": (186, 154, 127), "force": 150*50, "stiffness": 4500},
-    "bone" : {"color": (240, 240, 240), "force": 400*50, "stiffness": 15000},
-    # "tissue" : {"color": (255, 182, 193), "force": 0},
-    # "muscle" : {"color": (96, 5, 33), "force": 0},
-    # "lung" : {"color": (255, 255, 0), "force": 0},
-    # "fat" : {"color": (255, 140, 0), "force": 0},
-    # "nerve" : {"color": (0, 255, 0), "force": 0},
-}
 
 x_blocks = int(window_width/EE_width)
 y_blocks = int(window_height/EE_height)
@@ -84,11 +62,6 @@ y_blocks = int(window_height/EE_height)
 np.set_printoptions(threshold=np.inf)
 print(x_blocks)
 print(y_blocks)
-
-
-
-
-
 
 def generate_maze(y_blocks, x_blocks):
     # Start with a maze full of flesh (2)
@@ -174,7 +147,7 @@ def create_object_dict(maze, cell_size=25):
                     'color': (255,192,203),  # Pink
                     'rect': pygame.Rect(x * cell_size, y * cell_size, cell_size, cell_size),
                     'force': 10 * 100,  # Flesh has different properties
-                    'stiffness': 1000
+                    'stiffness': 2000
                 }
                 flesh_count += 1
 
@@ -183,22 +156,7 @@ def create_object_dict(maze, cell_size=25):
 maze = generate_maze(y_blocks, x_blocks)
 object_dict = create_object_dict(maze)
 
-def generate_random_object_configurations(num_layers, materials=materials):
-    object_dict = {}
-    y_height = 0
-    material_keys = list(materials.keys())  # Get the keys of the materials dictionary
-    for i in range(num_layers):
-        layer_name = f'layer_{i}'
-        selected_material = random.choice(material_keys)  # Randomly select a material
-        material = materials[selected_material]  # Get the material properties
-        color = material["color"]
-        force = material["force"]
-        stiffness = material["stiffness"]
-        height = random.randrange(50, 150, 25)  # Random height for the layer
-        rect = pygame.Rect(0, y_height, window_width, height)
-        y_height += height
-        object_dict[layer_name] = {'color': color, 'rect': rect, 'force': force, 'stiffness': stiffness}
-    return object_dict
+
 
 # Resolution in X
 x_steps = 25
@@ -351,7 +309,9 @@ def adjust_stifness(object_dict, idd):
     global Ks, Kd
     material_stifness = object_dict[str(int(idd))]['stiffness']
     Ks = np.diag([material_stifness, material_stifness])
-    Kd = 2 * np.sqrt(Ks * m) * 10
+    Kd = 2 * np.sqrt(Ks * m) * Kd_scale
+    print("New stiffness: ", Ks)
+    print("New damping: ", Kd)
 
 
 # Set up sockets
@@ -383,20 +343,26 @@ while run:
     pr = np.asarray(position)
 
     # Transform coordinates
-    pr[0] *= 800/600
-    pr[1] *= 600/400
+    pr[0] = pr[0]*800/600*1.4 -200
+    pr[1] = pr[1]*600/400*1.4 -200
+    # pr[0] = np.clip(pr[0], 0, window_width-EE_width)
+    # pr[1] = np.clip(pr[1], 0, window_height-EE_height)
 
     er_prev = er
     er = np.subtract(pr, p)  # Error
-    derr_dt = (er - er_prev) / dt  # derr/dt
+    vel = (er - er_prev) / dt  # derr/dt
+
+
 
     dp_dt = (p - p_prev)/dt
+    vel_ema = alpha * dp_dt + (1 - alpha) * vel_ema
     # dp_dt = np.clip(dp_dt, -1000, 1000)
     p_prev = p.copy()
 
+
     F_spring = -Ks @ er/100
     # F_damper = -(Kd @ derr_dt/100)
-    F_damper = (Kd @ dp_dt / 100)
+    F_damper = (Kd @ vel_ema / 100)
     F = F_spring + F_damper
     F = -F
     if n > 100:
@@ -414,11 +380,14 @@ while run:
     p += dp * dt
     t += dt
 
+    p[0] = np.clip(p[0], 0, window_width-EE_width-5)
+    p[1] = np.clip(p[1], 0, window_height-EE_height-5)
 
     collisions = check_collision(p, occupancy_grid, buffer=1)
     if len(collisions) == 0:
         Ks = Ks_initial.copy()
-        Kd = 2 * np.sqrt(Ks * m) * 10
+        Kd = Kd_initial.copy()
+
 
     processed_ids = set()
     for direction, (x, y, idd) in collisions.items():
@@ -435,7 +404,7 @@ while run:
             adjust_stifness(split_object_dict, idd)
             should_pop(idd, "mid-left")
             processed_ids.add(str(int(idd)))
-            p_prev = p.copy()
+            # p_prev = p.copy()
 
         elif direction in ["mid-right"]: #, "top-right", "bottom-right"
             p[0] = np.clip(p[0], 0, tl_x-EE_width)
@@ -444,7 +413,7 @@ while run:
             adjust_stifness(split_object_dict, idd)
             should_pop(idd, "mid-right")
             processed_ids.add(str(int(idd)))
-            p_prev = p.copy()
+            # p_prev = p.copy()
 
         if direction in ["mid-top"]: #, "top-left", "top-right"
             p[1] = np.clip(p[1], br_y, window_height)
@@ -453,7 +422,7 @@ while run:
             adjust_stifness(split_object_dict, idd)
             should_pop(idd, "mid-top")
             processed_ids.add(str(int(idd)))
-            p_prev = p.copy()
+            # p_prev = p.copy()
 
         elif direction in ["mid-bottom"]:
             p[1] = np.clip(p[1], 0, tl_y-EE_height)
@@ -462,7 +431,7 @@ while run:
             adjust_stifness(split_object_dict, idd)
             should_pop(idd, "mid-bottom")
             processed_ids.add(str(int(idd)))
-            p_prev = p.copy()
+            # p_prev = p.copy()
         
     vel_list.append(dp_dt)
     time_list.append(t)
